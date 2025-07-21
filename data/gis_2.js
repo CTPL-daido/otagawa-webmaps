@@ -1,1 +1,0 @@
-var json_gis_2 = {"type":"FeatureCollection","name":"gis_2","crs":{"type":"name","properties":{"name":"urn:ogc:def:crs:OGC:1.3:CRS84"}},"features":[{"type":"Feature","properties":{"fid":"1","URL":"https://hiroseshota.github.io/otagawa-ar/"},"geometry":{"type":"Point","coordinates":[136.890768816805235,35.023778350145989]}}]}
