@@ -14,11 +14,8 @@
         <link rel="stylesheet" href="css/MarkerCluster.Default.css">
         <style>
         #map {
-            width: 100%;
-            height: 100%;
-            left:0;
-            top:0;
-            position: fixed;
+            width: 1620px;
+            height: 844px;
         }
         </style>
         <title></title>
@@ -37,12 +34,12 @@
         <script src="js/labelgun.min.js"></script>
         <script src="js/labels.js"></script>
         <script src="js/leaflet.markercluster.js"></script>
-        <script src="data/_1.js"></script>
-        <script src="data/gis_2.js"></script>
+        <script src="data/_2.js"></script>
+        <script src="data/gis_3.js"></script>
         <script>
         var map = L.map('map', {
             zoomControl:false, maxZoom:28, minZoom:1
-        }).fitBounds([[35.02150630669538,136.89041981871463],[35.024273635120316,136.89502311629542]]);
+        }).fitBounds([[35.012153098857276,136.8744472713142],[35.030390644221555,136.91724110946652]]);
         var hash = new L.Hash(map);
         map.attributionControl.setPrefix('<a href="https://github.com/tomchadwin/qgis2web" target="_blank">qgis2web</a> &middot; <a href="https://leafletjs.com" title="A JS library for interactive maps">Leaflet</a> &middot; <a href="https://qgis.org">QGIS</a>');
         var autolinker = new Autolinker({truncate: {length: 30, location: 'smart'}});
@@ -79,16 +76,13 @@
         }).addTo(map);
         var bounds_group = new L.featureGroup([]);
         function setBounds() {
-            // 描画範囲
-            var bounds = L.latLngBounds(L.latLng(35.028360199466071,136.876900382412742), L.latLng(35.01466076237331,136.897671289512203));
-            map.fitBounds(bounds);
         }
         map.createPane('pane_03___0');
         map.getPane('pane_03___0').style.zIndex = 400;
         var layer_03___0 = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg', {
             pane: 'pane_03___0',
             opacity: 1.0,
-            attribution: '地理院タイル（国土地理院）',
+            attribution: '',
             minZoom: 1,
             maxZoom: 28,
             minNativeZoom: 2,
@@ -96,7 +90,20 @@
         });
         layer_03___0;
         map.addLayer(layer_03___0);
-        function pop__1(feature, layer) {
+        map.createPane('pane___1');
+        map.getPane('pane___1').style.zIndex = 401;
+        var layer___1 = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {
+            pane: 'pane___1',
+            opacity: 1.0,
+            attribution: '',
+            minZoom: 1,
+            maxZoom: 28,
+            minNativeZoom: 2,
+            maxNativeZoom: 18
+        });
+        layer___1;
+        map.addLayer(layer___1);
+        function pop__2(feature, layer) {
             var popupContent = '<table>\
                     <tr>\
                         <td colspan="2">' + (feature.properties['fid'] !== null ? autolinker.link(String(feature.properties['fid']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
@@ -109,9 +116,9 @@
 			layer.bindPopup(content, { maxHeight: 400 });
         }
 
-        function style__1_0() {
+        function style__2_0() {
             return {
-                pane: 'pane__1',
+                pane: 'pane__2',
                 opacity: 1,
                 color: 'rgba(227,26,28,1.0)',
                 dashArray: '',
@@ -124,21 +131,21 @@
                 interactive: true,
             }
         }
-        map.createPane('pane__1');
-        map.getPane('pane__1').style.zIndex = 401;
-        map.getPane('pane__1').style['mix-blend-mode'] = 'normal';
-        var layer__1 = new L.geoJson(json__1, {
+        map.createPane('pane__2');
+        map.getPane('pane__2').style.zIndex = 402;
+        map.getPane('pane__2').style['mix-blend-mode'] = 'normal';
+        var layer__2 = new L.geoJson(json__2, {
             attribution: '',
             interactive: true,
-            dataVar: 'json__1',
-            layerName: 'layer__1',
-            pane: 'pane__1',
-            onEachFeature: pop__1,
-            style: style__1_0,
+            dataVar: 'json__2',
+            layerName: 'layer__2',
+            pane: 'pane__2',
+            onEachFeature: pop__2,
+            style: style__2_0,
         });
-        bounds_group.addLayer(layer__1);
-        map.addLayer(layer__1);
-        function pop_gis_2(feature, layer) {
+        bounds_group.addLayer(layer__2);
+        map.addLayer(layer__2);
+        function pop_gis_3(feature, layer) {
             var popupContent = '<table>\
                     <tr>\
                         <td colspan="2">' + (feature.properties['fid'] !== null ? autolinker.link(String(feature.properties['fid']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
@@ -154,10 +161,10 @@
 			layer.bindPopup(content, { maxHeight: 400 });
         }
 
-        function style_gis_2_0() {
+        function style_gis_3_0() {
             return {
-                pane: 'pane_gis_2',
-                radius: 4.0,
+                pane: 'pane_gis_3',
+                radius: 10.0,
                 opacity: 1,
                 color: 'rgba(35,35,35,1.0)',
                 dashArray: '',
@@ -170,33 +177,34 @@
                 interactive: true,
             }
         }
-        map.createPane('pane_gis_2');
-        map.getPane('pane_gis_2').style.zIndex = 402;
-        map.getPane('pane_gis_2').style['mix-blend-mode'] = 'normal';
-        var layer_gis_2 = new L.geoJson(json_gis_2, {
+        map.createPane('pane_gis_3');
+        map.getPane('pane_gis_3').style.zIndex = 403;
+        map.getPane('pane_gis_3').style['mix-blend-mode'] = 'normal';
+        var layer_gis_3 = new L.geoJson(json_gis_3, {
             attribution: '',
             interactive: true,
-            dataVar: 'json_gis_2',
-            layerName: 'layer_gis_2',
-            pane: 'pane_gis_2',
-            onEachFeature: pop_gis_2,
+            dataVar: 'json_gis_3',
+            layerName: 'layer_gis_3',
+            pane: 'pane_gis_3',
+            onEachFeature: pop_gis_3,
             pointToLayer: function (feature, latlng) {
                 var context = {
                     feature: feature,
                     variables: {}
                 };
-                return L.circleMarker(latlng, style_gis_2_0(feature));
+                return L.circleMarker(latlng, style_gis_3_0(feature));
             },
         });
-        var cluster_gis_2 = new L.MarkerClusterGroup({showCoverageOnHover: false,
+        var cluster_gis_3 = new L.MarkerClusterGroup({showCoverageOnHover: false,
             spiderfyDistanceMultiplier: 2});
-        cluster_gis_2.addLayer(layer_gis_2);
+        cluster_gis_3.addLayer(layer_gis_3);
 
-        bounds_group.addLayer(layer_gis_2);
-        cluster_gis_2.addTo(map);
+        bounds_group.addLayer(layer_gis_3);
+        cluster_gis_3.addTo(map);
         var overlaysTree = [
-            {label: '<img src="legend/gis_2.png" /> gis点', layer: cluster_gis_2},
-            {label: '<img src="legend/_1.png" /> 枠', layer: layer__1},
+            {label: '<img src="legend/gis_3.png" /> gis点', layer: cluster_gis_3},
+            {label: '<img src="legend/_2.png" /> 枠', layer: layer__2},
+            {label: "地理院タイル_淡色地図", layer: layer___1, radioGroup: 'bm' },
             {label: "03_地理院タイル_(全国最新写真（シームレス））", layer: layer_03___0, radioGroup: 'bm' },]
         var lay = L.control.layers.tree(null, overlaysTree,{
             //namedToggle: true,
