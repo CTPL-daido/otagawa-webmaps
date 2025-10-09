@@ -2,166 +2,163 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <title>地理院タイル切替（常時パネル表示・Tree版）</title>
+  <title>地理院タイル切替（自前レイヤーパネル）</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-
   <!-- Leaflet（CDN） -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
-  <!-- L.Control.Layers.Tree（CDN） -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet.control.layers.tree@2.0.2/L.Control.Layers.Tree.css" />
-  <script src="https://unpkg.com/leaflet.control.layers.tree@2.0.2/L.Control.Layers.Tree.min.js"></script>
-
   <!-- MarkerCluster（CDN） -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
   <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
-
   <!-- Hash（CDN） -->
   <script src="https://unpkg.com/leaflet-hash@0.2.1/leaflet-hash.js"></script>
-
   <style>
     html, body, #map { height: 100%; margin: 0; padding: 0; }
     body { overscroll-behavior: none; touch-action: pan-x pan-y; }
     #map { padding-bottom: env(safe-area-inset-bottom); }
 
-    /* 右上のパネルをスマホでも見やすく */
-    .leaflet-top.leaflet-right { top: 10px; right: 10px; z-index: 1000; }
-    .leaflet-control-layers {
+    /* 右上の自前パネル（常時表示） */
+    .layer-panel {
+      position: fixed;
+      top: 10px; right: 10px;
+      z-index: 1000;
       background: rgba(255,255,255,.96);
-      font-size: 16px;            /* タップしやすい */
       border-radius: 10px;
-      box-shadow: 0 4px 16px rgba(0,0,0,.15);
-      max-height: 65vh;
-      overflow-y: auto;
-      -webkit-overflow-scrolling: touch;
-      padding-right: 6px;         /* スクロールバーの余白 */
+      box-shadow: 0 4px 16px rgba(0,0,0,.2);
+      padding: 10px 12px;
+      font: 16px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      min-width: 260px;
     }
-    /* 標準のトグルボタンは使わず、常時開いた箱にする */
-    .leaflet-control-layers-toggle { display: none; }
+    .layer-panel .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+    .layer-panel .title { font-weight: 700; margin: 4px 0 6px; }
+    .legend-dot { width:14px; height:14px; border-radius:50%; background:#ffcc00; border:1.5px solid #000; display:inline-block; }
+    .legend-square { width:14px; height:14px; background:#e00; border:1.5px solid #b00; display:inline-block; }
 
-    /* 出典の視認性 */
+    /* LeafletのUIちょい拡大（スマホ操作しやすく） */
+    .leaflet-control-zoom a { width: 40px; height: 40px; line-height: 40px; font-size: 20px; }
     .leaflet-control-attribution {
       background: rgba(255,255,255,.9);
-      padding: 2px 6px;
-      border-radius: 4px 0 0 0;
+      padding: 2px 6px; border-radius: 4px 0 0 0;
     }
-
-    /* 行内アイコン（インラインSVG） */
-    .legend-icon { display:inline-block; width:14px; height:14px; vertical-align:middle; margin-right:6px; }
   </style>
 </head>
 <body>
   <div id="map"></div>
 
-  <!-- ▼ あなたの qgis2web 出力を読み込む（ファイル名は何でもOK） -->
+  <!-- ▼ qgis2web 出力（ファイル名はあなたのままでOK） -->
   <script src="data/_1.js"></script>
   <script src="data/gis_2.js"></script>
   <!-- ▲ 追加があればさらに <script src="data/xxx.js"></script> を足してください -->
+
+  <!-- 自前のレイヤパネル（常時表示） -->
+  <div class="layer-panel" id="layerPanel">
+    <div class="title">表示レイヤ</div>
+    <label class="row"><input type="checkbox" id="chkPoints" checked><span class="legend-dot"></span>gis点</label>
+    <label class="row"><input type="checkbox" id="chkPolygon" checked><span class="legend-square"></span>枠</label>
+    <div class="title" style="margin-top:10px;">背景地図</div>
+    <label class="row"><input type="radio" name="basemap" id="rbPale" checked>地理院タイル（淡色地図）</label>
+    <label class="row"><input type="radio" name="basemap" id="rbPhoto">地理院タイル（全国最新写真）</label>
+  </div>
 
   <script>
     // ===== マップ初期化 =====
     const map = L.map('map', { zoomControl:false, maxZoom:18, minZoom:1, tap:true })
                  .fitBounds([[35.018,136.883],[35.028,136.900]]);
     new L.Hash(map);
-
-    // 左上ズーム
     L.control.zoom({ position: 'topleft' }).addTo(map);
 
-    // 左下クレジット（固定）
+    // 左下：固定クレジット
     map.attributionControl.setPrefix(
       '<a href="https://github.com/tomchadwin/qgis2web" target="_blank">qgis2web</a> · ' +
       '<a href="https://leafletjs.com" target="_blank">Leaflet</a> · ' +
       '<a href="https://qgis.org" target="_blank">QGIS</a>'
     );
 
-    // ===== ベース（地理院タイル） =====
+    // ===== ベースマップ（出典つき） =====
     const gsiListUrl = 'https://maps.gsi.go.jp/development/ichiran.html';
-    const basePale  = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {
+    const basePale = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {
       minZoom:1, maxZoom:18,
-      attribution: '出典：<a href="'+gsiListUrl+'" target="_blank" rel="noopener">地理院タイル</a>（淡色地図）'
-    }).addTo(map); // 初期は淡色
+      attribution:'出典：<a href="'+gsiListUrl+'" target="_blank" rel="noopener">地理院タイル</a>（淡色地図）'
+    }).addTo(map);
     const basePhoto = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg', {
       minZoom:1, maxZoom:18,
-      attribution: '出典：<a href="'+gsiListUrl+'" target="_blank" rel="noopener">地理院タイル</a>（全国最新写真）'
+      attribution:'出典：<a href="'+gsiListUrl+'" target="_blank" rel="noopener">地理院タイル</a>（全国最新写真）'
     });
 
-    // ===== data/*.js の変数名を自動検出 =====
+    // ===== data/*.js の FeatureCollection を自動検出 =====
     function collectGeoJSON(){
       const polys=[], points=[];
-      for(const k in window){
-        if(!/^json[_A-Za-z0-9]*$/.test(k)) continue;
-        const v=window[k];
-        if(!v || v.type!=='FeatureCollection' || !Array.isArray(v.features) || !v.features.length) continue;
-        const t=v.features[0]?.geometry?.type;
-        if(t==='Polygon'||t==='MultiPolygon') polys.push(v);
-        if(t==='Point'  ||t==='MultiPoint')   points.push(v);
+      for (const k in window){
+        if (!/^json[_A-Za-z0-9]*$/.test(k)) continue;
+        const v = window[k];
+        if (!v || v.type!=='FeatureCollection' || !Array.isArray(v.features) || !v.features.length) continue;
+        const t = v.features[0]?.geometry?.type;
+        if (t==='Polygon'||t==='MultiPolygon') polys.push(v);
+        if (t==='Point'  ||t==='MultiPoint')   points.push(v);
       }
       return {polys, points};
     }
     const found = collectGeoJSON();
 
-    // ===== オーバーレイ作成 =====
-    const overlays = {};
+    // ===== オーバーレイ生成 =====
     let layerPolygon=null, layerPointsRaw=null, clusterPoints=null;
 
-    if(found.polys.length){
-      const polyFC = found.polys.length>1 ? {type:'FeatureCollection',features:found.polys.flatMap(v=>v.features)} : found.polys[0];
+    if (found.polys.length){
+      const polyFC = found.polys.length>1 ? {type:'FeatureCollection', features:found.polys.flatMap(v=>v.features)} : found.polys[0];
       layerPolygon = L.geoJSON(polyFC, {
         interactive:true,
-        style:()=>({color:'red', weight:6, opacity:1, fill:false})
+        style:()=>({ color:'red', weight:6, opacity:1, fill:false })
       }).addTo(map);
-      overlays['枠（ポリゴン）'] = layerPolygon;
     }
-
-    if(found.points.length){
-      const pointFC = found.points.length>1 ? {type:'FeatureCollection',features:found.points.flatMap(v=>v.features)} : found.points[0];
+    if (found.points.length){
+      const pointFC = found.points.length>1 ? {type:'FeatureCollection', features:found.points.flatMap(v=>v.features)} : found.points[0];
       layerPointsRaw = L.geoJSON(pointFC, {
         interactive:true,
-        pointToLayer:(f,latlng)=>L.circleMarker(latlng,{radius:7, fillColor:'#ffcc00', color:'#000', weight:1.5, opacity:1, fillOpacity:1})
+        pointToLayer:(f,latlng)=>L.circleMarker(latlng,{ radius:7, fillColor:'#ffcc00', color:'#000', weight:1.5, opacity:1, fillOpacity:1 }),
+        onEachFeature:(f,layer)=>{
+          const link=f.properties?.url || f.properties?.URL;
+          if (link) layer.bindPopup('<a href="'+link+'" target="_blank" rel="noopener">リンク</a>');
+        }
       });
       clusterPoints = L.markerClusterGroup({ showCoverageOnHover:false, spiderfyOnMaxZoom:true, disableClusteringAtZoom:17 })
-                       .addLayer(layerPointsRaw).addTo(map);
-      overlays['gis点'] = clusterPoints;
+                        .addLayer(layerPointsRaw).addTo(map);
     }
 
-    // ===== アイコン（インラインSVG） =====
-    const iconPoint = '<span class="legend-icon" style="background:url(\'data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2214%22 height=%2214%22><circle cx=%227%22 cy=%227%22 r=%226%22 fill=%22%23ffcc00%22 stroke=%22%23000%22 stroke-width=%221.2%22/></svg>\') no-repeat center/14px 14px"></span>';
-    const iconPoly  = '<span class="legend-icon" style="background:url(\'data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2214%22 height=%2214%22><rect x=%222%22 y=%222%22 width=%2210%22 height=%2210%22 fill=%22%23e00%22 stroke=%22%23b00%22 stroke-width=%221%22/></svg>\') no-repeat center/14px 14px"></span>';
+    // ===== 自前パネルのイベント配線 =====
+    const $ = id => document.getElementById(id);
 
-    // ===== Treeパネル（ベース＝ラジオ、オーバーレイ＝チェック） =====
-    const baseTree = {
-      label: '',
-      children: [
-        { label: '地理院タイル（淡色地図）', layer: basePale,  radioGroup: 'basemap' },
-        { label: '地理院タイル（全国最新写真）', layer: basePhoto, radioGroup: 'basemap' }
-      ]
-    };
+    // 背景：ラジオ切替（確実に反応）
+    $('rbPale').addEventListener('change', e => {
+      if (e.target.checked) { map.addLayer(basePale); map.removeLayer(basePhoto); }
+    });
+    $('rbPhoto').addEventListener('change', e => {
+      if (e.target.checked) { map.addLayer(basePhoto); map.removeLayer(basePale); }
+    });
 
-    const overlayTree = {
-      label: '',
-      children: [
-        { label: iconPoint + 'gis点', layer: overlays['gis点'] },
-        { label: iconPoly  + '枠',    layer: overlays['枠（ポリゴン）'] }
-      ].filter(x => x.layer) // ないものは除外
-    };
+    // オーバーレイ：チェックON/OFF
+    $('chkPolygon').addEventListener('change', e => {
+      if (!layerPolygon) return;
+      e.target.checked ? map.addLayer(layerPolygon) : map.removeLayer(layerPolygon);
+    });
+    $('chkPoints').addEventListener('change', e => {
+      if (!clusterPoints) return;
+      e.target.checked ? map.addLayer(clusterPoints) : map.removeLayer(clusterPoints);
+    });
 
-    // 常時開いた白いパネルとして表示（collapsed:false）
-    L.control.layers.tree(baseTree, overlayTree, {
-      collapsed: false,
-      namedToggle: false,        // 見出しのトグルを出さない
-      selectAllCheckbox: false,  // “全選択”は今回はオフ
-      position: 'topright'
-    }).addTo(map);
+    // 初期状態をUIと同期
+    $('rbPale').checked = true;
+    $('rbPhoto').checked = false;
+    $('chkPolygon').checked = !!layerPolygon;
+    $('chkPoints').checked  = !!clusterPoints;
 
-    // ===== 表示範囲をデータに合わせる =====
+    // データに合わせて表示範囲
     const fitTargets=[];
-    if(layerPolygon)   fitTargets.push(layerPolygon);
-    if(layerPointsRaw) fitTargets.push(layerPointsRaw);
-    if(fitTargets.length){
+    if (layerPolygon)   fitTargets.push(layerPolygon);
+    if (layerPointsRaw) fitTargets.push(layerPointsRaw);
+    if (fitTargets.length){
       const fg=L.featureGroup(fitTargets);
-      map.fitBounds(fg.getBounds(), {padding:[10,10]});
+      map.fitBounds(fg.getBounds(), { padding:[10,10] });
     }
   </script>
 </body>
