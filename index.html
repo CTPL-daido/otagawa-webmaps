@@ -2,12 +2,12 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <title>地理院タイル切替（自前レイヤーパネル）</title>
+  <title>地理院タイル切替（スマホ安定：ノークラスタ）</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <!-- Leaflet（CDN） -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <!-- MarkerCluster（CDN） -->
+  <!-- MarkerCluster（CDN：PC用に残す） -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
   <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
@@ -31,30 +31,22 @@
     .legend-dot { width:14px; height:14px; border-radius:50%; background:#ffcc00; border:1.5px solid #000; display:inline-block; }
     .legend-square { width:14px; height:14px; background:#e00; border:1.5px solid #b00; display:inline-block; }
 
-    /* LeafletのUIちょい拡大（スマホ操作しやすく） */
+    /* Leaflet UI（スマホ操作しやすく） */
     .leaflet-control-zoom a { width: 40px; height: 40px; line-height: 40px; font-size: 20px; }
     .leaflet-control-attribution { background: rgba(255,255,255,.9); padding: 2px 6px; border-radius: 4px 0 0 0; }
-
-    /* 小さな診断表示 */
-    .diag {
-      position: fixed; left: 8px; bottom: 8px; z-index: 1200;
-      background: rgba(0,0,0,.6); color:#fff; padding:6px 8px; border-radius:6px;
-      font: 12px/1.4 system-ui; pointer-events:none;
-    }
   </style>
 </head>
 <body>
   <div id="map"></div>
 
-  <!-- ▼ qgis2web 出力：名前違いに対応するため、候補をすべて読み込む -->
+  <!-- qgis2web 出力（名前違いにも対応できるよう候補を複数読み込み） -->
   <script src="data/_1.js"></script>
-  <script src="data/_2.js"></script>         <!-- 追加：枠が _2.js のケース用 -->
+  <script src="data/_2.js"></script>
   <script src="data/gis_2.js"></script>
-  <script src="data/gis_3.js"></script>      <!-- 追加：点が gis_3.js のケース用 -->
-  <!-- ▲ 実体が無ければ404になるだけ（問題なし）。存在するファイルの中身だけ自動認識します。 -->
+  <script src="data/gis_3.js"></script>
 
-  <!-- 自前のレイヤパネル（常時表示） -->
-  <div class="layer-panel" id="layerPanel">
+  <!-- 自前パネル -->
+  <div class="layer-panel">
     <div class="title">表示レイヤ</div>
     <label class="row"><input type="checkbox" id="chkPoints" checked><span class="legend-dot"></span>gis点</label>
     <label class="row"><input type="checkbox" id="chkPolygon" checked><span class="legend-square"></span>枠</label>
@@ -64,20 +56,46 @@
   </div>
 
   <script>
-    // ===== マップ初期化 =====
-    const map = L.map('map', { zoomControl:false, maxZoom:18, minZoom:1, tap:true })
-                 .fitBounds([[35.018,136.883],[35.028,136.900]]);
+    /* ===== 端末判定 ===== */
+    const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+    /* ===== リンク抽出＆正規化 ===== */
+    function extractHrefMaybeHtml(str){
+      const m = String(str).match(/href\s*=\s*["']([^"']+)["']/i);
+      return m ? m[1] : String(str);
+    }
+    function getLinkFromProps(props){
+      if(!props) return null;
+      const order = ['url','URL','タイトル','title','Title','link','Link','リンク'];
+      for(const k of order){ if (props[k]) return extractHrefMaybeHtml(props[k]); }
+      return null;
+    }
+    function sanitizeLink(raw){
+      if(!raw) return null;
+      let s = String(raw).trim();
+      s = s.replace(/：/g, ':').replace(/[／＼]/g, '/');
+      if (/^(mailto|tel):/i.test(s)) return s;
+      if (/^\/\//.test(s)) s = 'https:' + s;
+      if (!/^[a-z][a-z0-9+\-.]*:\/\//i.test(s)) s = 'https://' + s;
+      try { return encodeURI(s); } catch { return s; }
+    }
+
+    /* ===== マップ初期化 ===== */
+    const map = L.map('map', {
+      zoomControl:false, maxZoom:18, minZoom:1,
+      tap:true, tapTolerance: 20   // 親指タップ許容
+    }).fitBounds([[35.018,136.883],[35.028,136.900]]);
     new L.Hash(map);
     L.control.zoom({ position: 'topleft' }).addTo(map);
 
-    // 左下：固定クレジット
+    // 出典（左下固定）
     map.attributionControl.setPrefix(
       '<a href="https://github.com/tomchadwin/qgis2web" target="_blank">qgis2web</a> · ' +
       '<a href="https://leafletjs.com" target="_blank">Leaflet</a> · ' +
       '<a href="https://qgis.org" target="_blank">QGIS</a>'
     );
 
-    // ===== ベースマップ（出典つき） =====
+    /* ===== ベース ===== */
     const gsiListUrl = 'https://maps.gsi.go.jp/development/ichiran.html';
     const basePale = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {
       minZoom:1, maxZoom:18,
@@ -88,7 +106,7 @@
       attribution:'出典：<a href="'+gsiListUrl+'" target="_blank" rel="noopener">地理院タイル</a>（全国最新写真）'
     });
 
-    // ===== data/*.js の FeatureCollection を自動検出 =====
+    /* ===== data/*.js を自動検出 ===== */
     function collectGeoJSON(){
       const polys=[], points=[];
       for (const k in window){
@@ -103,19 +121,20 @@
     }
     const found = collectGeoJSON();
 
-    // ===== オーバーレイ生成 =====
-    let layerPolygon=null, layerPointsRaw=null, clusterPoints=null;
+    /* ===== オーバーレイ生成 ===== */
+    let layerPolygon=null, layerPointsRaw=null, pointsLayerOnMap=null;
 
+    // 枠：スマホで邪魔しないように非インタラクティブ
     if (found.polys.length){
       const polyFC = found.polys.length>1 ? {type:'FeatureCollection', features:found.polys.flatMap(v=>v.features)} : found.polys[0];
       layerPolygon = L.geoJSON(polyFC, {
-        interactive:true,
+        interactive:false,               // ← ここがポイント
         style:()=>({ color:'red', weight:6, opacity:1, fill:false })
       }).addTo(map);
     }
 
     if (found.points.length){
-      // MultiPoint を Point 群にフラット化（念のための保険）
+      // MultiPoint → Point 保険
       const toPointFC = (fc)=>{
         const features=[];
         fc.features.forEach(f=>{
@@ -133,42 +152,53 @@
         ? { type:'FeatureCollection', features: found.points.flatMap(v=>toPointFC(v).features) }
         : toPointFC(found.points[0]);
 
+      // マーカーのサイズ：スマホは大きめ
+      const markerRadius = isTouch ? 9 : 7;
+
       layerPointsRaw = L.geoJSON(merged, {
         interactive:true,
-        pointToLayer:(f,latlng)=>L.circleMarker(latlng,{ radius:7, fillColor:'#ffcc00', color:'#000', weight:1.5, opacity:1, fillOpacity:1 }),
+        pointToLayer:(f,latlng)=>L.circleMarker(latlng,{ radius:markerRadius, fillColor:'#ffcc00', color:'#000', weight:1.5, opacity:1, fillOpacity:1 }),
         onEachFeature:(f,layer)=>{
-          const link=f.properties?.url || f.properties?.URL;
-          if (link) layer.bindPopup('<a href="'+link+'" target="_blank" rel="noopener">リンク</a>');
+          const raw = getLinkFromProps(f.properties);
+          const link = sanitizeLink(raw);
+          if (link) {
+            const html = '<div style="min-width:220px">リンク：<br><a href="'+link+'" target="_blank" rel="noopener">'+link+'</a></div>';
+            layer.bindPopup(html, { closeOnClick:false, autoClose:false });
+          }
+          // スマホで確実に開く：click と touchend 両方で popup を開く
+          layer.on('touchend', ()=> layer.openPopup());
         }
       });
 
-      clusterPoints = L.markerClusterGroup({ showCoverageOnHover:false, spiderfyOnMaxZoom:true, disableClusteringAtZoom:17 })
-                        .addLayer(layerPointsRaw).addTo(map);
+      if (isTouch){
+        // スマホ：クラスタ無し（重なりタップ問題を回避）
+        pointsLayerOnMap = layerPointsRaw.addTo(map);
+      } else {
+        // PC：クラスタあり
+        const cluster = L.markerClusterGroup({
+          showCoverageOnHover:false, spiderfyOnMaxZoom:true, disableClusteringAtZoom:17
+        }).addLayer(layerPointsRaw).addTo(map);
+        pointsLayerOnMap = cluster;
+      }
     }
 
-    // ===== 自前パネルのイベント配線 =====
+    /* ===== パネルのイベント ===== */
     const $ = id => document.getElementById(id);
-
-    // 背景：ラジオ切替
     $('rbPale').addEventListener('change', e => { if (e.target.checked) { map.addLayer(basePale); map.removeLayer(basePhoto); }});
     $('rbPhoto').addEventListener('change', e => { if (e.target.checked) { map.addLayer(basePhoto); map.removeLayer(basePale); }});
-
-    // オーバーレイ：チェックON/OFF
     $('chkPolygon').addEventListener('change', e => { if (layerPolygon)  (e.target.checked ? map.addLayer(layerPolygon)  : map.removeLayer(layerPolygon)); });
-    $('chkPoints').addEventListener('change',  e => { if (clusterPoints) (e.target.checked ? map.addLayer(clusterPoints) : map.removeLayer(clusterPoints)); });
+    $('chkPoints').addEventListener('change',  e => {
+      if (!pointsLayerOnMap) return;
+      e.target.checked ? map.addLayer(pointsLayerOnMap) : map.removeLayer(pointsLayerOnMap);
+    });
 
-    // 初期状態をUIと同期
+    // 初期状態同期
     $('rbPale').checked = true; $('rbPhoto').checked = false;
-    $('chkPolygon').checked = !!layerPolygon; $('chkPoints').checked  = !!clusterPoints;
+    $('chkPolygon').checked = !!layerPolygon; $('chkPoints').checked  = !!pointsLayerOnMap;
 
-    // データに合わせて表示範囲
+    // 表示範囲
     const fitTargets=[]; if (layerPolygon) fitTargets.push(layerPolygon); if (layerPointsRaw) fitTargets.push(layerPointsRaw);
     if (fitTargets.length){ const fg=L.featureGroup(fitTargets); map.fitBounds(fg.getBounds(), { padding:[10,10] }); }
-
-    // 検出数を画面に表示（0件のとき気づけるように）
-    const d=document.createElement('div'); d.className='diag';
-    d.textContent=`polygons: ${found.polys.length}, points: ${found.points.length}`;
-    document.body.appendChild(d); setTimeout(()=>d.remove(), 7000);
   </script>
 </body>
 </html>
