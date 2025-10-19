@@ -14,8 +14,10 @@
     .leaflet-interactive { cursor:pointer; }
     .leaflet-control-attribution { display:block !important; font-size:12px; }
     .leaflet-control-layers { max-height: 70svh; overflow:auto; }
-    /* ★ 枠のレイヤーはタッチを拾わない（下の点をタップ可能に） */
-    .leaflet-pane.pane-frame { pointer-events: none; }
+
+    /* ★ 枠レイヤーは常時表示だがタッチを透過させる（子要素まで徹底） */
+    .leaflet-pane.pane-frame,
+    .leaflet-pane.pane-frame * { pointer-events: none !important; }
   </style>
   <title>Web Map</title>
 </head>
@@ -50,12 +52,17 @@
     const gsiPale = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',
       { minZoom:1, maxZoom:20, minNativeZoom:2, maxNativeZoom:18 }).addTo(map);
 
-    // ===== 枠（_2）——タッチを通す設定 =====
-    // 枠専用の pane を作って pointer-events: none を適用（CSSで指定済み）
-    const framePane = map.createPane('pane_frame');
-    framePane.style.zIndex = 300;
+    // ===== Pane settings =====
+    // 枠（下段・タッチ透過）
+    const framePane = map.createPane('pane_frame');     // class を付与してCSS適用
     framePane.classList.add('pane-frame');
+    framePane.style.zIndex = 330;                       // ベースタイルより上、点レイヤより下に配置
 
+    // 点（上段・タッチ取得）
+    const pointsPane = map.createPane('pane_points');
+    pointsPane.style.zIndex = 450;                      // 枠より上にして確実にタッチ取得
+
+    // ===== 枠（_2）——常に見える＆タッチ透過 =====
     function style__2_0() {
       return { opacity:1, color:'#e31a1c', weight:11, fill:true, fillOpacity:0, interactive:false };
     }
@@ -69,7 +76,8 @@
     function onEach_gis_3(feature, layer){
       const href = (feature.properties && (feature.properties.URL || feature.properties.url))
         ? String(feature.properties.URL || feature.properties.url) : '';
-      const fid  = feature.properties && feature.properties.fid != null ? String(feature.properties.fid) : '';
+      const fid  = (feature.properties && feature.properties.fid != null)
+        ? String(feature.properties.fid) : '';
       const html =
         '<table>' +
           '<tr><td colspan="2">'+ autolinker.link(fid) +'</td></tr>' +
@@ -78,6 +86,7 @@
       layer.bindPopup(html, { maxHeight: 400 });
     }
     const layer_gis_3 = L.geoJSON(json_gis_3, {
+      pane:'pane_points',
       pointToLayer: (f, latlng)=> L.circleMarker(latlng, style_gis_3_0(f)),
       onEachFeature: onEach_gis_3
     }).addTo(map);
