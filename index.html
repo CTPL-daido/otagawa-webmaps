@@ -10,13 +10,12 @@
   <link rel="stylesheet" href="css/qgis2web.css">
   <style>
     html, body { margin:0; padding:0; height:100%; overflow:hidden; -webkit-tap-highlight-color: transparent; }
-    /* iOSバーの高さ変動に強い全画面 */
     #map { width:100vw; height:100svh; }
     .leaflet-interactive { cursor:pointer; }
-    /* 出典が確実に表示されるよう強制 */
     .leaflet-control-attribution { display:block !important; font-size:12px; }
-    /* レイヤーコントロールをモバイルで押しやすく */
     .leaflet-control-layers { max-height: 70svh; overflow:auto; }
+    /* ★ 枠のレイヤーはタッチを拾わない（下の点をタップ可能に） */
+    .leaflet-pane.pane-frame { pointer-events: none; }
   </style>
   <title>Web Map</title>
 </head>
@@ -30,7 +29,7 @@
   <script src="data/gis_3.js"></script>
 
   <script>
-    // ===== Map（スマホ操作すべて有効）=====
+    // ===== Map =====
     const map = L.map('map', {
       zoomControl: true,
       dragging: true,
@@ -41,36 +40,35 @@
     }).fitBounds([[35.00873592469054,136.8754285322846],[35.03087538697442,136.9122549129309]]);
     new L.Hash(map);
 
-    // 出典（右下）
-    map.attributionControl.setPrefix(
-      '<a href="https://leafletjs.com" target="_blank">Leaflet</a>'
-    );
+    // attribution
+    map.attributionControl.setPrefix('<a href="https://leafletjs.com" target="_blank">Leaflet</a>');
     map.attributionControl.addAttribution('地理院タイル（国土地理院） / qgis2web / QGIS');
 
-    // ===== ベースレイヤ（2種類） =====
-    const gsiPhoto = L.tileLayer(
-      'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',
-      { minZoom:1, maxZoom:20, minNativeZoom:2, maxNativeZoom:18 }
-    );
-    const gsiPale = L.tileLayer(
-      'https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',
-      { minZoom:1, maxZoom:20, minNativeZoom:2, maxNativeZoom:18 }
-    ).addTo(map); // 初期表示
+    // basemaps
+    const gsiPhoto = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',
+      { minZoom:1, maxZoom:20, minNativeZoom:2, maxNativeZoom:18 });
+    const gsiPale = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',
+      { minZoom:1, maxZoom:20, minNativeZoom:2, maxNativeZoom:18 }).addTo(map);
 
-    // ===== オーバーレイ：枠（_2） =====
+    // ===== 枠（_2）——タッチを通す設定 =====
+    // 枠専用の pane を作って pointer-events: none を適用（CSSで指定済み）
+    const framePane = map.createPane('pane_frame');
+    framePane.style.zIndex = 300;
+    framePane.classList.add('pane-frame');
+
     function style__2_0() {
-      return { opacity:1, color:'#e31a1c', weight:11, fill:true, fillOpacity:0, interactive:true };
+      return { opacity:1, color:'#e31a1c', weight:11, fill:true, fillOpacity:0, interactive:false };
     }
-    const layer__2 = L.geoJSON(json__2, { style: style__2_0 });
+    const layer__2 = L.geoJSON(json__2, { pane:'pane_frame', style: style__2_0, interactive:false }).addTo(map);
 
-    // ===== オーバーレイ：点（gis_3）ポップアップに「リンク：URL」 =====
+    // ===== 点（gis_3） =====
     const autolinker = new Autolinker({ truncate:{ length:30, location:'smart' } });
     function style_gis_3_0() {
       return { radius:8, color:'#000', weight:2, fill:true, fillColor:'#fff', fillOpacity:1 };
     }
     function onEach_gis_3(feature, layer){
-      const href = (feature.properties && (feature.properties.URL || feature.properties.url)) ?
-        String(feature.properties.URL || feature.properties.url) : '';
+      const href = (feature.properties && (feature.properties.URL || feature.properties.url))
+        ? String(feature.properties.URL || feature.properties.url) : '';
       const fid  = feature.properties && feature.properties.fid != null ? String(feature.properties.fid) : '';
       const html =
         '<table>' +
@@ -84,14 +82,13 @@
       onEachFeature: onEach_gis_3
     }).addTo(map);
 
-    // ===== レイヤーコントロール（常時表示・右上） =====
+    // ===== Layer control =====
     L.control.layers(
       { "地理院タイル_淡色地図": gsiPale, "全国最新写真（シームレス）": gsiPhoto },
       { "gis点": layer_gis_3, "枠": layer__2 },
       { collapsed:false, position:'topright' }
     ).addTo(map);
 
-    // 画面回転/アドレスバー変動でサイズ再計算
     addEventListener('resize', ()=> map.invalidateSize(), { passive:true });
   </script>
 </body>
