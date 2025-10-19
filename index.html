@@ -1,159 +1,98 @@
 <!doctype html>
 <html lang="ja">
-  <head>
-    <meta charset="utf-8" />
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="initial-scale=1,maximum-scale=1,width=device-width">
-    <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <link rel="stylesheet" href="css/leaflet.css">
-    <link rel="stylesheet" href="css/L.Control.Layers.Tree.css">
-    <link rel="stylesheet" href="css/qgis2web.css">
-    <link rel="stylesheet" href="css/fontawesome-all.min.css">
-    <style>
-      html, body { height: 100%; margin: 0; }
-      #map { width: 100%; height: 100%; }
-      .leaflet-interactive { cursor: pointer; }
-    </style>
-    <title>Web Map</title>
-  </head>
-  <body>
-    <div id="map"></div>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="initial-scale=1, maximum-scale=1, width=device-width, viewport-fit=cover, user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="stylesheet" href="css/leaflet.css">
+  <link rel="stylesheet" href="css/qgis2web.css">
+  <style>
+    html, body { margin:0; padding:0; height:100%; overflow:hidden; -webkit-tap-highlight-color: transparent; }
+    /* iOSバーの高さ変動に強い全画面 */
+    #map { width:100vw; height:100svh; }
+    .leaflet-interactive { cursor:pointer; }
+    /* 出典が確実に表示されるよう強制 */
+    .leaflet-control-attribution { display:block !important; font-size:12px; }
+    /* レイヤーコントロールをモバイルで押しやすく */
+    .leaflet-control-layers { max-height: 70svh; overflow:auto; }
+  </style>
+  <title>Web Map</title>
+</head>
+<body>
+  <div id="map"></div>
 
-    <script src="js/qgis2web_expressions.js"></script>
-    <script src="js/leaflet.js"></script>
-    <script src="js/L.Control.Layers.Tree.min.js"></script>
-    <script src="js/leaflet.rotatedMarker.js"></script>
-    <script src="js/leaflet.pattern.js"></script>
-    <script src="js/leaflet-hash.js"></script>
-    <script src="js/Autolinker.min.js"></script>
-    <script src="js/rbush.min.js"></script>
-    <script src="js/labelgun.min.js"></script>
-    <script src="js/labels.js"></script>
-    <script src="data/_2.js"></script>
-    <script src="data/gis_3.js"></script>
+  <script src="js/leaflet.js"></script>
+  <script src="js/leaflet-hash.js"></script>
+  <script src="js/Autolinker.min.js"></script>
+  <script src="data/_2.js"></script>
+  <script src="data/gis_3.js"></script>
 
-    <script>
-      // ===== Map =====
-      const map = L.map('map', {
-        zoomControl: true,          // ズームUIあり
-        dragging: true,             // ドラッグ移動OK
-        touchZoom: true,            // ピンチズームOK
-        tap: true,                  // タップ有効
-        scrollWheelZoom: true,      // マウスホイールOK
-        maxZoom: 18, minZoom: 1
-      }).fitBounds([[35.00873592469054,136.8754285322846],[35.03087538697442,136.9122549129309]]);
+  <script>
+    // ===== Map（スマホ操作すべて有効）=====
+    const map = L.map('map', {
+      zoomControl: true,
+      dragging: true,
+      touchZoom: true,
+      tap: true,
+      scrollWheelZoom: true,
+      maxZoom: 20, minZoom: 1
+    }).fitBounds([[35.00873592469054,136.8754285322846],[35.03087538697442,136.9122549129309]]);
+    new L.Hash(map);
 
-      // 出典とハッシュ
-      map.attributionControl.setPrefix(
-        '<a href="https://github.com/tomchadwin/qgis2web" target="_blank">qgis2web</a> · '+
-        '<a href="https://leafletjs.com" target="_blank">Leaflet</a> · '+
-        '<a href="https://qgis.org" target="_blank">QGIS</a>'
-      );
-      map.attributionControl.addAttribution('地理院タイル（国土地理院）');
-      new L.Hash(map);
+    // 出典（右下）
+    map.attributionControl.setPrefix(
+      '<a href="https://leafletjs.com" target="_blank">Leaflet</a>'
+    );
+    map.attributionControl.addAttribution('地理院タイル（国土地理院） / qgis2web / QGIS');
 
-      const autolinker = new Autolinker({ truncate: { length: 30, location: 'smart' } });
+    // ===== ベースレイヤ（2種類） =====
+    const gsiPhoto = L.tileLayer(
+      'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',
+      { minZoom:1, maxZoom:20, minNativeZoom:2, maxNativeZoom:18 }
+    );
+    const gsiPale = L.tileLayer(
+      'https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',
+      { minZoom:1, maxZoom:20, minNativeZoom:2, maxNativeZoom:18 }
+    ).addTo(map); // 初期表示
 
-      // ===== helpers =====
-      function removeEmptyRowsFromPopupContent(content, feature) {
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = content;
-        const rows = tempDiv.querySelectorAll('tr');
-        for (let i = 0; i < rows.length; i++) {
-          const td = rows[i].querySelector('td.visible-with-data');
-          const key = td ? td.id : '';
-          if (td && td.classList.contains('visible-with-data') && feature.properties[key] == null) {
-            rows[i].parentNode.removeChild(rows[i]);
-          }
-        }
-        return tempDiv.innerHTML;
-      }
-      function addClassToPopupIfMedia(content, popup) {
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = content;
-        if (tempDiv.querySelector('td img')) {
-          popup._contentNode.classList.add('media');
-          setTimeout(() => popup.update(), 10);
-        } else {
-          popup._contentNode.classList.remove('media');
-        }
-      }
+    // ===== オーバーレイ：枠（_2） =====
+    function style__2_0() {
+      return { opacity:1, color:'#e31a1c', weight:11, fill:true, fillOpacity:0, interactive:true };
+    }
+    const layer__2 = L.geoJSON(json__2, { style: style__2_0 });
 
-      // ===== Basemaps =====
-      map.createPane('pane_photo'); map.getPane('pane_photo').style.zIndex = 200;
-      const photo = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg', {
-        pane: 'pane_photo', minZoom: 1, maxZoom: 18, minNativeZoom: 2, maxNativeZoom: 18
-      });
+    // ===== オーバーレイ：点（gis_3）ポップアップに「リンク：URL」 =====
+    const autolinker = new Autolinker({ truncate:{ length:30, location:'smart' } });
+    function style_gis_3_0() {
+      return { radius:8, color:'#000', weight:2, fill:true, fillColor:'#fff', fillOpacity:1 };
+    }
+    function onEach_gis_3(feature, layer){
+      const href = (feature.properties && (feature.properties.URL || feature.properties.url)) ?
+        String(feature.properties.URL || feature.properties.url) : '';
+      const fid  = feature.properties && feature.properties.fid != null ? String(feature.properties.fid) : '';
+      const html =
+        '<table>' +
+          '<tr><td colspan="2">'+ autolinker.link(fid) +'</td></tr>' +
+          '<tr><td colspan="2">'+ (href ? 'リンク：<br><a href="'+href+'" target="_self">'+href+'</a>' : 'リンク：—') +'</td></tr>' +
+        '</table>';
+      layer.bindPopup(html, { maxHeight: 400 });
+    }
+    const layer_gis_3 = L.geoJSON(json_gis_3, {
+      pointToLayer: (f, latlng)=> L.circleMarker(latlng, style_gis_3_0(f)),
+      onEachFeature: onEach_gis_3
+    }).addTo(map);
 
-      map.createPane('pane_pale'); map.getPane('pane_pale').style.zIndex = 200;
-      const pale = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {
-        pane: 'pane_pale', minZoom: 1, maxZoom: 18, minNativeZoom: 2, maxNativeZoom: 18
-      });
+    // ===== レイヤーコントロール（常時表示・右上） =====
+    L.control.layers(
+      { "地理院タイル_淡色地図": gsiPale, "全国最新写真（シームレス）": gsiPhoto },
+      { "gis点": layer_gis_3, "枠": layer__2 },
+      { collapsed:false, position:'topright' }
+    ).addTo(map);
 
-      // 初期表示は淡色地図
-      pale.addTo(map);
-
-      // ===== 枠（_2） =====
-      function pop__2(feature, layer) {
-        const popupContent = '<table>' +
-          '<tr><td colspan="2">' + (feature.properties['fid'] !== null ? autolinker.link(String(feature.properties['fid']).replace(/\'/g, '\'').toLocaleString()) : '') + '</td></tr>' +
-          '</table>';
-        const content = removeEmptyRowsFromPopupContent(popupContent, feature);
-        layer.on('popupopen', e => addClassToPopupIfMedia(content, e.popup));
-        layer.bindPopup(content, { maxHeight: 400 });
-      }
-      function style__2_0() {
-        return { pane:'pane__2', opacity:1, color:'rgba(227,26,28,1.0)', dashArray:'',
-                 lineCap:'butt', lineJoin:'miter', weight:11.0, fill:true, fillOpacity:1,
-                 fillColor:'rgba(231,113,72,0.0)', interactive:true };
-      }
-      map.createPane('pane__2'); map.getPane('pane__2').style.zIndex = 300;
-      const layer__2 = L.geoJson(json__2, { pane:'pane__2', style: style__2_0, onEachFeature: pop__2 });
-      layer__2.addTo(map);
-
-      // ===== 点（gis_3）：ポップアップに「リンク：URL」表示 =====
-      function pop_gis_3(feature, layer) {
-        const href = (feature.properties && (feature.properties.URL || feature.properties.url))
-          ? String(feature.properties.URL || feature.properties.url) : '';
-        const popupContent = '<table>' +
-          '<tr><td colspan="2">' + (feature.properties['fid'] !== null
-             ? autolinker.link(String(feature.properties['fid']).replace(/\'/g, '\'').toLocaleString()) : '') + '</td></tr>' +
-          '<tr><td colspan="2">' + (href ? 'リンク：<br><a href="'+href+'" target="_self">'+href+'</a>' : 'リンク：—') + '</td></tr>' +
-          '</table>';
-        const content = removeEmptyRowsFromPopupContent(popupContent, feature);
-        layer.on('popupopen', e => addClassToPopupIfMedia(content, e.popup));
-        layer.bindPopup(content, { maxHeight: 400 });
-      }
-      function style_gis_3_0() {
-        return { pane:'pane_gis_3', radius:8, opacity:1, color:'rgba(0,0,0,1.0)', weight:2,
-                 fill:true, fillOpacity:1, fillColor:'rgba(255,255,255,1.0)', interactive:true };
-      }
-      map.createPane('pane_gis_3'); map.getPane('pane_gis_3').style.zIndex = 350;
-      const layer_gis_3 = L.geoJson(json_gis_3, {
-        pane:'pane_gis_3',
-        onEachFeature: pop_gis_3,
-        pointToLayer: (feature, latlng) => L.circleMarker(latlng, style_gis_3_0(feature))
-      }).addTo(map);
-
-      // ===== Layers control（右上） =====
-      const overlaysTree = [
-        { label: '<img src="legend/gis_3.png" /> gis点', layer: layer_gis_3 },
-        { label: '<img src="legend/_2.png" /> 枠', layer: layer__2 }
-      ];
-      const basemapsTree = [
-        { label: "地理院タイル_淡色地図", layer: pale, radioGroup: 'bm' },
-        { label: "全国最新写真（シームレス）", layer: photo, radioGroup: 'bm' }
-      ];
-      const ctl = L.control.layers.tree(
-        { label: "ベースマップ", children: basemapsTree },
-        overlaysTree,
-        { collapsed: false, position: 'topright' }   // ← 常時表示
-      );
-      ctl.addTo(map);
-
-      // 画面サイズ変更時も全画面を維持
-      window.addEventListener('resize', () => map.invalidateSize());
-    </script>
-  </body>
+    // 画面回転/アドレスバー変動でサイズ再計算
+    addEventListener('resize', ()=> map.invalidateSize(), { passive:true });
+  </script>
+</body>
 </html>
