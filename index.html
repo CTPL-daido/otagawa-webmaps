@@ -16,11 +16,19 @@
     html, body { margin:0; padding:0; height:100%; -webkit-tap-highlight-color: transparent; }
     #map { width:100vw; height:100svh; touch-action: pan-x pan-y pinch-zoom; }
 
-    /* レイヤツリー（スマホ左上） */
+    /* レイヤツリー（スマホ左上固定） */
     .leaflet-control-layers-tree { max-height: 70svh; overflow:auto; }
     @media (max-width: 900px){
-      /* ズームボタンと干渉しにくい余白（必要に応じて微調整） */
+      .leaflet-top.leaflet-left{
+        position: fixed;       /* 画面左上に固定 */
+        top: 8px;
+        left: 8px;
+        z-index: 10050;
+        width: auto;
+      }
       .leaflet-top.leaflet-left .leaflet-control-layers { margin-top: 46px; }
+      .leaflet-control-layers,
+      .leaflet-control-layers-tree { max-height: 70svh; overflow:auto; }
     }
 
     /* 枠は見えるがタップは通す（点のクリックを邪魔しない） */
@@ -34,47 +42,15 @@
       opacity: 0; transition: opacity .12s ease; pointer-events:none;
     }
     .toast.show { opacity: 1; }
-
-    /* ===== 属性パネル（下からスライド：QGISの属性順のまま） ===== */
-    .attr-panel {
-      position: fixed; left:0; right:0; bottom:0; z-index:10010; background:#fff;
-      border-top-left-radius:16px; border-top-right-radius:16px; box-shadow:0 -8px 24px rgba(0,0,0,.18);
-      transform: translateY(100%); transition: transform .18s ease-out; max-height:60svh; display:flex; flex-direction:column;
-    }
-    .attr-panel.show { transform: translateY(0); }
-    .attr-panel .handle { width:48px; height:5px; border-radius:3px; background:#e0e0e0; margin:8px auto 4px; }
-    .attr-panel header { padding:6px 14px 2px; font-weight:700; font-size:16px; }
-    .attr-panel .body { padding:6px 14px 12px; overflow:auto; }
-    .attr-panel table { width:100%; border-collapse:collapse; font-size:14px; }
-    .attr-panel th, .attr-panel td { padding:6px 4px; border-bottom:1px solid #eee; word-break: break-all; }
-    .attr-panel th { text-align:left; color:#555; width:34%; }
-    .attr-dim { color:#888; font-size:12px; }
-    .attr-actions { padding:8px 14px 12px; display:flex; gap:8px; justify-content:flex-end; border-top:1px solid #f0f0f0; }
-    .attr-actions a, .attr-actions button { padding:8px 12px; border-radius:10px; border:1px solid #ccc; background:#fff; cursor:pointer; }
-    .attr-actions .primary { border-color:#1c7ed6; color:#1c7ed6; font-weight:700; }
   </style>
 
-  <title>全部入り Webマップ（前仕様＋ポップアップ＋属性＋2ステップ遷移）</title>
+  <title>Webマップ（前仕様＋ポップアップ＋2ステップ遷移・全部入り）</title>
 </head>
 <body>
   <div id="map"></div>
 
   <!-- 何をタップしたかトースト -->
   <div id="tapToast" class="toast" aria-live="polite" aria-atomic="true"></div>
-
-  <!-- 属性パネル（QGIS属性を“元の順序”で表示／ボタンでAR開始） -->
-  <div id="attrPanel" class="attr-panel" aria-live="polite">
-    <div class="handle"></div>
-    <header id="attrTitle">属性</header>
-    <div class="body">
-      <table id="attrTable"></table>
-      <div id="attrNote" class="attr-dim"></div>
-    </div>
-    <div class="attr-actions">
-      <button type="button" id="attrCloseBtn">閉じる</button>
-      <a id="attrOpenBtn" class="primary" href="#" target="_self" rel="noopener">ARを開始</a>
-    </div>
-  </div>
 
   <!-- 既存JS資産 -->
   <script src="js/leaflet.js"></script>
@@ -124,6 +100,7 @@
     }).addTo(map);
 
     // ===== util =====
+    // 表示名：QGIS属性の最初の値（B案：順序を尊重）
     function firstNonEmptyPropValue(props){
       if (!props) return '属性';
       const skip = new Set(['geometry','boundedBy']);
@@ -132,8 +109,7 @@
       }
       return '属性';
     }
-    function labelOf(key){ return key; } // キー名そのまま（B案）
-    function valToText(v){ if (v==null) return ''; return (typeof v==='object') ? JSON.stringify(v) : String(v); }
+    // URL候補（URL/url/Url/link など、または値が http(s) 始まりの最初のもの）
     function findUrlFromProps(props){
       if (!props) return null;
       for (const k of Object.keys(props)){
@@ -145,9 +121,10 @@
       }
       return null;
     }
+    // HTMLエスケープ
     function esc(s){ return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
 
-    // ===== トースト & パルス =====
+    // ===== トースト & ポヨッ（肥大化が蓄積しない） =====
     const toastEl = document.getElementById('tapToast');
     function showToast(text){
       toastEl.textContent = text; toastEl.classList.add('show');
@@ -155,72 +132,24 @@
     }
     function pulseMarker(layer){
       try{
-        const o = layer.options;
-        layer.setStyle({ radius: o.radius * 1.35, weight: (o.weight||1) + 2 });
-        setTimeout(()=> layer.setStyle({ radius: o.radius, weight: o.weight }), 450);
+        if (!layer._baseStyle) {
+          layer._baseStyle = { r: layer.options.radius, w: (layer.options.weight || 1) };
+        }
+        // 連打時は一度リセット
+        if (layer._pulseTimer) {
+          clearTimeout(layer._pulseTimer);
+          layer.setStyle({ radius: layer._baseStyle.r, weight: layer._baseStyle.w });
+        }
+        const R = layer._baseStyle.r, W = layer._baseStyle.w;
+        layer.setStyle({ radius: R * 1.35, weight: W + 2 });
+        layer._pulseTimer = setTimeout(()=>{
+          layer.setStyle({ radius: R, weight: W });
+          layer._pulseTimer = null;
+        }, 400);
       }catch(e){}
     }
 
-    // ===== 属性パネル =====
-    const pRoot  = document.getElementById('attrPanel');
-    const pTitle = document.getElementById('attrTitle');
-    const pTable = document.getElementById('attrTable');
-    const pNote  = document.getElementById('attrNote');
-    const pOpen  = document.getElementById('attrOpenBtn');
-    const pClose = document.getElementById('attrCloseBtn');
-
-    function openAttrPanel(props){
-      pTitle.textContent = firstNonEmptyPropValue(props);
-
-      // QGISの属性順で表示（geometry等は除外）
-      pTable.innerHTML = '';
-      const skip = new Set(['geometry','boundedBy']);
-      let rows = 0;
-      for (const k of Object.keys(props || {})){
-        if (skip.has(k)) continue;
-        const v = props[k];
-        if (v === null || v === undefined || String(v) === '') continue;
-
-        const tr = document.createElement('tr');
-        const th = document.createElement('th'); th.textContent = labelOf(k);
-        const td = document.createElement('td');
-
-        const t = valToText(v);
-        if (k.toLowerCase() === 'url' || /^https?:\/\//i.test(t)){
-          const a = document.createElement('a');
-          a.href = t; a.textContent = t; a.target = '_self'; a.rel='noopener';
-          td.appendChild(a);
-        } else {
-          td.textContent = t;
-        }
-        tr.appendChild(th); tr.appendChild(td); pTable.appendChild(tr); rows++;
-      }
-      pNote.textContent = rows ? '' : 'このポイントに表示できる属性はありません。';
-
-      const url = findUrlFromProps(props);
-      if (url){ pOpen.style.display=''; pOpen.href = url; }
-      else    { pOpen.style.display='none'; }
-
-      pRoot.classList.add('show');
-    }
-    function closeAttrPanel(){ pRoot.classList.remove('show'); }
-    pClose.addEventListener('click', closeAttrPanel);
-    (function swipeToClose(){
-      let y=null;
-      pRoot.addEventListener('touchstart',e=>{ y=e.touches[0].clientY; },{passive:true});
-      pRoot.addEventListener('touchmove', e=>{
-        if (y===null) return;
-        if (e.touches[0].clientY - y > 80){ closeAttrPanel(); y=null; }
-      },{passive:true});
-    })();
-
-    // 属性パネルをポップアップの「詳細」から呼び出すためのグローバル関数
-    window.__openAttr = function(encoded){
-      try{ openAttrPanel(JSON.parse(decodeURIComponent(encoded))); }catch(e){}
-      return false;
-    };
-
-    // ===== Points（gis点：トースト＋ポヨッ＋ポップアップ→リンク／属性） =====
+    // ===== Points（gis点：トースト＋ポヨッ＋ポップアップ→リンクでAR開始／“詳細”なし） =====
     map.createPane('pane_points'); map.getPane('pane_points').style.zIndex = 403;
     function style_gis_3_0() {
       return { pane:'pane_points', radius:10, opacity:1, color:'rgba(35,35,35,1.0)', weight:1, fill:true, fillOpacity:1, fillColor:'rgba(229,182,54,1.0)' };
@@ -233,14 +162,12 @@
         const fid = (props.fid ?? props.id ?? '').toString();
         const url = findUrlFromProps(props);
 
-        // 画像のようなシンプルな内容（fid と URL: リンク）＋ 詳細（属性パネル）リンク
+        // ポップアップは「fid / URL: リンク」のみ（“詳細”や属性パネルは無し）
         const html =
           `<div style="font-size:13px;line-height:1.4;">
             ${fid ? `fid:　${esc(fid)}<br>` : ``}
-            ${url ? `URL:　<a href="${esc(url)}" target="_self" rel="noopener">リンク</a><br>` : ``}
-            <a href="#" onclick="return window.__openAttr('${encodeURIComponent(JSON.stringify(props))}');">詳細</a>
+            ${url ? `URL:　<a href="${esc(url)}" target="_self" rel="noopener">リンク</a>` : ``}
           </div>`;
-
         layer.bindPopup(html, { maxWidth: 260, closeButton: true, autoClose: true });
 
         layer.on('click', ()=>{
@@ -260,7 +187,7 @@
     ];
     L.control.layers.tree(null, overlaysTree, {
       collapsed:false,
-      position: isMobile ? 'topleft' : 'topright' // ★ スマホは左上
+      position: isMobile ? 'topleft' : 'topright' // スマホは左上固定
     }).addTo(map);
 
     // レイアウト再計算（回転/アドレスバー変動でのボケ防止）
