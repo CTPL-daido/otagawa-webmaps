@@ -16,20 +16,18 @@
     html, body { margin:0; padding:0; height:100%; -webkit-tap-highlight-color: transparent; }
     #map { width:100vw; height:100svh; touch-action: pan-x pan-y pinch-zoom; }
 
-    /* レイヤツリー（スマホ左上固定） */
-    .leaflet-control-layers-tree { max-height: 70svh; overflow:auto; }
-    @media (max-width: 900px){
-      .leaflet-top.leaflet-left{
-        position: fixed;       /* 画面左上に固定 */
-        top: 8px;
-        left: 8px;
-        z-index: 10050;
-        width: auto;
-      }
-      .leaflet-top.leaflet-left .leaflet-control-layers { margin-top: 46px; }
-      .leaflet-control-layers,
-      .leaflet-control-layers-tree { max-height: 70svh; overflow:auto; }
+    /* —— レイヤツリー：常に画面左上に“固定” —— */
+    .leaflet-top.leaflet-left{
+      position: fixed;    /* viewport基準で固定 */
+      top: 8px;
+      left: 8px;
+      z-index: 10050;     /* UIが地図より常に上に来る */
+      width: auto;
     }
+    .leaflet-control-layers,
+    .leaflet-control-layers-tree { max-height: 70svh; overflow:auto; }
+    /* ズームボタンなどが左上にある場合の余白調整（必要に応じて） */
+    .leaflet-top.leaflet-left .leaflet-control-layers { margin-top: 46px; }
 
     /* 枠は見えるがタップは通す（点のクリックを邪魔しない） */
     .leaflet-pane.pane-frame, .leaflet-pane.pane-frame * { pointer-events: none !important; }
@@ -44,7 +42,7 @@
     .toast.show { opacity: 1; }
   </style>
 
-  <title>Webマップ（前仕様＋ポップアップ＋2ステップ遷移・全部入り）</title>
+  <title>Webマップ（左上固定＋高精細ズーム・全部入り）</title>
 </head>
 <body>
   <div id="map"></div>
@@ -62,13 +60,23 @@
   <script src="data/gis_3.js"></script> <!-- 点（URL等の属性を含む） -->
 
   <script>
-    // ===== 端末判定 & ぼやけ防止設定 =====
-    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    // ===== 設定：ぼやけ防止・ズーム仕様 =====
     const MAX_NATIVE_ZOOM = 18; // GSIタイルの実用ネイティブ最大
+    // ※ “ズームしてもボケない”ためのポイント
+    //   1) map.maxZoom を 18（=maxNativeZoom）に制限（過ズーム補間を止める）
+    //   2) detectRetina:true（Retinaで高精細タイルを使用）
+    //   3) zoomSnap:1 / zoomDelta:1（小数ズームを禁止→CSSスケーリングによるボケ防止）
 
-    // ===== Map（z>18での拡大補間＝ぼやけを防ぐ） =====
-    const map = L.map('map', { zoomControl:true, maxZoom: MAX_NATIVE_ZOOM, minZoom:1 })
-      .fitBounds([[35.02142399844622,136.88612396178715],[35.02547667835214,136.89563370359895]]);
+    // ===== Map =====
+    const map = L.map('map', {
+      zoomControl: true,
+      minZoom: 1,
+      maxZoom: MAX_NATIVE_ZOOM,
+      zoomSnap: 1,      // ★ 小数ズームを使わない（ボケ防止）
+      zoomDelta: 1,     // ★ 1段階ずつ
+      wheelDebounceTime: 40,
+      zoomAnimation: true
+    }).fitBounds([[35.02142399844622,136.88612396178715],[35.02547667835214,136.89563370359895]]);
     new L.Hash(map);
 
     // 出典
@@ -79,15 +87,19 @@
     map.createPane('pane_base_photo');  map.getPane('pane_base_photo').style.zIndex = 200;
     map.createPane('pane_base_pale');   map.getPane('pane_base_pale').style.zIndex  = 201;
 
-    // Retina対応（detectRetina）＋ maxNativeZoom を明示
-    const layer_photo = L.tileLayer(
-      'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',
-      { pane:'pane_base_photo', detectRetina:true, maxNativeZoom: MAX_NATIVE_ZOOM }
-    ).addTo(map); // 初期は写真
-    const layer_pale = L.tileLayer(
-      'https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',
-      { pane:'pane_base_pale', detectRetina:true, maxNativeZoom: MAX_NATIVE_ZOOM }
-    );
+    // Retina対応＋maxNativeZoom 明示（ボケ防止）
+    const layer_photo = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg', {
+      pane: 'pane_base_photo',
+      detectRetina: true,
+      maxNativeZoom: MAX_NATIVE_ZOOM,
+      updateWhenZooming: true
+    }).addTo(map); // 初期は写真
+    const layer_pale = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {
+      pane: 'pane_base_pale',
+      detectRetina: true,
+      maxNativeZoom: MAX_NATIVE_ZOOM,
+      updateWhenZooming: true
+    });
 
     // ===== Frame（枠：常時表示・タッチ透過） =====
     map.createPane('pane_frame'); map.getPane('pane_frame').classList.add('pane-frame');
@@ -100,7 +112,6 @@
     }).addTo(map);
 
     // ===== util =====
-    // 表示名：QGIS属性の最初の値（B案：順序を尊重）
     function firstNonEmptyPropValue(props){
       if (!props) return '属性';
       const skip = new Set(['geometry','boundedBy']);
@@ -109,7 +120,6 @@
       }
       return '属性';
     }
-    // URL候補（URL/url/Url/link など、または値が http(s) 始まりの最初のもの）
     function findUrlFromProps(props){
       if (!props) return null;
       for (const k of Object.keys(props)){
@@ -121,7 +131,6 @@
       }
       return null;
     }
-    // HTMLエスケープ
     function esc(s){ return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
 
     // ===== トースト & ポヨッ（肥大化が蓄積しない） =====
@@ -135,7 +144,6 @@
         if (!layer._baseStyle) {
           layer._baseStyle = { r: layer.options.radius, w: (layer.options.weight || 1) };
         }
-        // 連打時は一度リセット
         if (layer._pulseTimer) {
           clearTimeout(layer._pulseTimer);
           layer.setStyle({ radius: layer._baseStyle.r, weight: layer._baseStyle.w });
@@ -162,7 +170,6 @@
         const fid = (props.fid ?? props.id ?? '').toString();
         const url = findUrlFromProps(props);
 
-        // ポップアップは「fid / URL: リンク」のみ（“詳細”や属性パネルは無し）
         const html =
           `<div style="font-size:13px;line-height:1.4;">
             ${fid ? `fid:　${esc(fid)}<br>` : ``}
@@ -187,10 +194,10 @@
     ];
     L.control.layers.tree(null, overlaysTree, {
       collapsed:false,
-      position: isMobile ? 'topleft' : 'topright' // スマホは左上固定
+      position: 'topleft'   // 常に左上（ズーム・ドラッグ・回転でも動かない）
     }).addTo(map);
 
-    // レイアウト再計算（回転/アドレスバー変動でのボケ防止）
+    // ビューポート変動（回転/バー出し入れ/サイズ変更）でも再計測してボケを避ける
     map.whenReady(()=> map.invalidateSize());
     addEventListener('orientationchange', ()=> setTimeout(()=> map.invalidateSize(), 200), { passive:true });
     addEventListener('resize',            ()=> setTimeout(()=> map.invalidateSize(), 200), { passive:true });
