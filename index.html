@@ -6,32 +6,80 @@
   <meta name="viewport" content="initial-scale=1, maximum-scale=1, width=device-width, viewport-fit=cover, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <!-- 既存アセット（qgis2web出力のまま） -->
+
+  <!-- 既存のqgis2web資産を利用 -->
   <link rel="stylesheet" href="css/leaflet.css">
   <link rel="stylesheet" href="css/L.Control.Layers.Tree.css">
   <link rel="stylesheet" href="css/qgis2web.css">
+
   <style>
     html, body { margin:0; padding:0; height:100%; -webkit-tap-highlight-color: transparent; }
     #map { width:100vw; height:100svh; touch-action: pan-x pan-y pinch-zoom; }
-    /* 枠は見えるけどタップは通す（点が押せるように） */
-    .leaflet-pane.pane-frame,
-    .leaflet-pane.pane-frame * { pointer-events:none !important; }
-    /* パネルの見た目はqgis2web標準のまま（画像の感じ） */
-    .leaflet-control-layers-tree { max-height:70svh; overflow:auto; }
+
+    /* レイヤツリー（前と同じ見た目） */
+    .leaflet-control-layers-tree { max-height: 70svh; overflow:auto; }
+
+    /* 枠は見えるがタップは通す（点のクリックを邪魔しない） */
+    .leaflet-pane.pane-frame, .leaflet-pane.pane-frame * { pointer-events: none !important; }
+
+    /* ===== トースト（何をタップしたか一時表示） ===== */
+    .toast {
+      position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%);
+      z-index: 10000; background: rgba(0,0,0,0.78); color:#fff;
+      padding: 8px 12px; border-radius: 12px; font-size: 14px; line-height: 1.4;
+      opacity: 0; transition: opacity .12s ease; pointer-events:none;
+    }
+    .toast.show { opacity: 1; }
+
+    /* ===== 属性パネル（下からスライド） ===== */
+    .attr-panel {
+      position: fixed; left:0; right:0; bottom:0; z-index:10010; background:#fff;
+      border-top-left-radius:16px; border-top-right-radius:16px; box-shadow:0 -8px 24px rgba(0,0,0,.18);
+      transform: translateY(100%); transition: transform .18s ease-out; max-height:60svh; display:flex; flex-direction:column;
+    }
+    .attr-panel.show { transform: translateY(0); }
+    .attr-panel .handle { width:48px; height:5px; border-radius:3px; background:#e0e0e0; margin:8px auto 4px; }
+    .attr-panel header { padding:6px 14px 2px; font-weight:700; font-size:16px; }
+    .attr-panel .body { padding:6px 14px 12px; overflow:auto; }
+    .attr-panel table { width:100%; border-collapse:collapse; font-size:14px; }
+    .attr-panel th, .attr-panel td { padding:6px 4px; border-bottom:1px solid #eee; word-break: break-all; }
+    .attr-panel th { text-align:left; color:#555; width:34%; }
+    .attr-dim { color:#888; font-size:12px; }
+    .attr-actions { padding:8px 14px 12px; display:flex; gap:8px; justify-content:flex-end; border-top:1px solid #f0f0f0; }
+    .attr-actions a, .attr-actions button { padding:8px 12px; border-radius:10px; border:1px solid #ccc; background:#fff; cursor:pointer; }
+    .attr-actions .primary { border-color:#1c7ed6; color:#1c7ed6; font-weight:700; }
   </style>
-  <title>レイヤツリー（前と同じ見た目）</title>
+
+  <title>Webマップ（前仕様＋属性表示・2ステップ遷移）</title>
 </head>
 <body>
   <div id="map"></div>
 
-  <!-- JS資産 -->
+  <!-- 何をタップしたかトースト -->
+  <div id="tapToast" class="toast" aria-live="polite" aria-atomic="true"></div>
+
+  <!-- 属性パネル（QGIS属性を“元の順序”で表示／リンクを押すとAR開始） -->
+  <div id="attrPanel" class="attr-panel" aria-live="polite">
+    <div class="handle"></div>
+    <header id="attrTitle">属性</header>
+    <div class="body">
+      <table id="attrTable"></table>
+      <div id="attrNote" class="attr-dim"></div>
+    </div>
+    <div class="attr-actions">
+      <button type="button" id="attrCloseBtn">閉じる</button>
+      <a id="attrOpenBtn" class="primary" href="#" target="_self" rel="noopener">ARを開始</a>
+    </div>
+  </div>
+
+  <!-- 既存JS資産 -->
   <script src="js/leaflet.js"></script>
   <script src="js/L.Control.Layers.Tree.min.js"></script>
   <script src="js/leaflet-hash.js"></script>
 
-  <!-- データ（qgis2web出力） -->
+  <!-- 既存データ（qgis2web出力） -->
   <script src="data/_2.js"></script>    <!-- 枠 -->
-  <script src="data/gis_3.js"></script> <!-- 点（URL属性） -->
+  <script src="data/gis_3.js"></script> <!-- 点（URL等の属性を含む） -->
 
   <script>
     // ===== Map =====
@@ -43,20 +91,18 @@
     map.attributionControl.setPrefix('<a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a> · <a href="https://qgis.org" target="_blank" rel="noopener">QGIS</a> · qgis2web');
     map.attributionControl.addAttribution('地理院タイル（国土地理院）');
 
-    // ===== Base layers（画像のようにラジオ） =====
+    // ===== Base layers（ラジオ） =====
     map.createPane('pane_base_photo');  map.getPane('pane_base_photo').style.zIndex = 200;
     map.createPane('pane_base_pale');   map.getPane('pane_base_pale').style.zIndex  = 201;
 
     const layer_photo = L.tileLayer(
       'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',
       { pane:'pane_base_photo', minNativeZoom:2, maxNativeZoom:18 }
-    );
+    ).addTo(map); // 初期は写真
     const layer_pale = L.tileLayer(
       'https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',
       { pane:'pane_base_pale',  minNativeZoom:2, maxNativeZoom:18 }
     );
-    // 最初は写真側をON（画像例に合わせる）
-    layer_photo.addTo(map);
 
     // ===== Frame（枠：常時表示・タッチ透過） =====
     map.createPane('pane_frame'); map.getPane('pane_frame').classList.add('pane-frame');
@@ -65,38 +111,141 @@
     const layer_frame = L.geoJSON(json__2, {
       pane:'pane_frame',
       interactive:false,
-      style: ()=>({
-        opacity:1, color:'rgba(227,26,28,1.0)', weight:11,
-        fill:true, fillOpacity:0
-      })
+      style: ()=>({ opacity:1, color:'rgba(227,26,28,1.0)', weight:11, fill:true, fillOpacity:0 })
     }).addTo(map);
 
-    // ===== Points（gis点：タップで直リンク） =====
-    map.createPane('pane_points'); map.getPane('pane_points').style.zIndex = 403;
+    // ===== util =====
+    // B案：タイトルも「属性の最初の項目の値」を優先（NAMEなどに固定しない）
+    function firstNonEmptyPropValue(props){
+      if (!props) return '';
+      const skip = new Set(['geometry','boundedBy']);
+      for (const k of Object.keys(props)){ // JSはキー挿入順を保持（一般的ブラウザ実装）
+        if (skip.has(k)) continue;
+        const v = props[k];
+        if (v !== null && v !== undefined && String(v) !== '') return String(v);
+      }
+      return '属性';
+    }
+    function labelOf(key){ return key; } // B案：キー名そのまま（ラベル変換しない）
+    function valToText(v){
+      if (v === null || v === undefined) return '';
+      if (typeof v === 'object') return JSON.stringify(v);
+      return String(v);
+    }
+    // URL候補の検出：キーがURL系、または値がhttp(s)で始まるものの“先頭に見つかった”もの
+    function findUrlFromProps(props){
+      if (!props) return null;
+      for (const k of Object.keys(props)){
+        const v = props[k];
+        if (v === null || v === undefined) continue;
+        const s = String(v).trim();
+        if (k.toLowerCase() === 'url' || k.toLowerCase() === 'link' || /^https?:\/\//i.test(s)){
+          if (/^https?:\/\//i.test(s)) return s;
+        }
+      }
+      return null;
+    }
 
+    // ===== トースト & パルス =====
+    const toastEl = document.getElementById('tapToast');
+    function showToast(text){
+      toastEl.textContent = text; toastEl.classList.add('show');
+      clearTimeout(showToast._t); showToast._t = setTimeout(()=> toastEl.classList.remove('show'), 1000);
+    }
+    function pulseMarker(layer){
+      try{
+        const o = layer.options;
+        layer.setStyle({ radius: o.radius * 1.35, weight: (o.weight||1) + 2 });
+        setTimeout(()=> layer.setStyle({ radius: o.radius, weight: o.weight }), 500);
+      }catch(e){}
+    }
+
+    // ===== 属性パネル =====
+    const pRoot  = document.getElementById('attrPanel');
+    const pTitle = document.getElementById('attrTitle');
+    const pTable = document.getElementById('attrTable');
+    const pNote  = document.getElementById('attrNote');
+    const pOpen  = document.getElementById('attrOpenBtn');
+    const pClose = document.getElementById('attrCloseBtn');
+
+    function openAttrPanel(props){
+      // タイトルは“最初の項目の値”を表示（B案）
+      pTitle.textContent = firstNonEmptyPropValue(props);
+
+      // テーブル生成：QGISの属性順（オブジェクトのキー順）でそのまま表示
+      pTable.innerHTML = '';
+      const skip = new Set(['geometry','boundedBy']);
+      let rows = 0;
+      for (const k of Object.keys(props || {})){
+        if (skip.has(k)) continue;
+        const v = props[k];
+        if (v === null || v === undefined || String(v) === '') continue;
+
+        const tr = document.createElement('tr');
+        const th = document.createElement('th'); th.textContent = labelOf(k);
+        const td = document.createElement('td');
+
+        const t = valToText(v);
+        if (k.toLowerCase() === 'url' || /^https?:\/\//i.test(t)){
+          const a = document.createElement('a');
+          a.href = t; a.textContent = t; a.target = '_self'; a.rel='noopener';
+          td.appendChild(a);
+        } else {
+          td.textContent = t;
+        }
+        tr.appendChild(th); tr.appendChild(td); pTable.appendChild(tr); rows++;
+      }
+      pNote.textContent = rows ? '' : 'このポイントに表示できる属性はありません。';
+
+      // 「ARを開始」ボタン
+      const url = findUrlFromProps(props);
+      if (url){ pOpen.style.display=''; pOpen.href = url; }
+      else    { pOpen.style.display='none'; }
+
+      pRoot.classList.add('show');
+    }
+    function closeAttrPanel(){ pRoot.classList.remove('show'); }
+    pClose.addEventListener('click', closeAttrPanel);
+    (function swipeToClose(){
+      let y=null;
+      pRoot.addEventListener('touchstart',e=>{ y=e.touches[0].clientY; },{passive:true});
+      pRoot.addEventListener('touchmove', e=>{
+        if (y===null) return;
+        if (e.touches[0].clientY - y > 80){ closeAttrPanel(); y=null; }
+      },{passive:true});
+    })();
+
+    // ===== Points（gis点：トースト＋ポヨッ＋属性パネル→リンクでAR開始） =====
+    map.createPane('pane_points'); map.getPane('pane_points').style.zIndex = 403;
+    function style_gis_3_0() {
+      return { pane:'pane_points', radius:10, opacity:1, color:'rgba(35,35,35,1.0)', weight:1, fill:true, fillOpacity:1, fillColor:'rgba(229,182,54,1.0)' };
+    }
     const layer_points = L.geoJSON(json_gis_3, {
       pane:'pane_points',
-      pointToLayer: (f, latlng)=> L.circleMarker(latlng, {
-        radius:10, opacity:1, color:'rgba(35,35,35,1.0)', weight:1,
-        fill:true, fillOpacity:1, fillColor:'rgba(229,182,54,1.0)'
-      }),
+      pointToLayer: (f, latlng)=> L.circleMarker(latlng, style_gis_3_0(f)),
       onEachFeature: (feature, layer)=>{
-        const props = feature && feature.properties ? feature.properties : {};
-        const url = (props.URL || props.url || props.Url || props.link || '').toString().trim();
-        if (url) layer.on('click', ()=> location.href = url);
+        const props = feature?.properties || {};
+        layer.on('click', ()=>{
+          // 何をタップしたか：B案でも視認性のため、最初の項目値を表示
+          const title = firstNonEmptyPropValue(props) || 'ポイント';
+          showToast(`選択: ${title}`);
+          pulseMarker(layer);
+          // パネルを開く（ここでリンクを確認 → 「ARを開始」をタップする2ステップ固定）
+          openAttrPanel(props);
+        });
       }
     }).addTo(map);
 
-    // ===== qgis2web風ツリーパネル（画像の見た目） =====
+    // ===== レイヤツリー（前と同じ qgis2web 形式） =====
     const overlaysTree = [
-      { label: '<img src="legend/gis_3.png" /> gis点', layer: layer_points },
-      { label: '<img src="legend/_2.png" /> 枠', layer: layer_frame },
-      { label: '地理院タイル_淡色地図', layer: layer_pale,   radioGroup:'bm' },
-      { label: '03_地理院タイル_(全国最新写真（シームレス））', layer: layer_photo, radioGroup:'bm' }
+      { label:'<img src="legend/gis_3.png" /> gis点', layer: layer_points },
+      { label:'<img src="legend/_2.png" /> 枠', layer: layer_frame },
+      { label:'地理院タイル_淡色地図', layer: layer_pale, radioGroup:'bm' },
+      { label:'03_地理院タイル_(全国最新写真（シームレス））', layer: layer_photo, radioGroup:'bm' }
     ];
     L.control.layers.tree(null, overlaysTree, { collapsed:false }).addTo(map);
 
-    // レイアウト再計算（回転/アドレスバーで）
+    // レイアウト再計算
     addEventListener('resize', ()=> map.invalidateSize(), { passive:true });
   </script>
 </body>
