@@ -16,8 +16,12 @@
     html, body { margin:0; padding:0; height:100%; -webkit-tap-highlight-color: transparent; }
     #map { width:100vw; height:100svh; touch-action: pan-x pan-y pinch-zoom; }
 
-    /* レイヤツリー（前と同じ見た目） */
+    /* レイヤツリー（スマホ左上） */
     .leaflet-control-layers-tree { max-height: 70svh; overflow:auto; }
+    @media (max-width: 900px){
+      /* ズームボタンと干渉しにくい余白（必要に応じて微調整） */
+      .leaflet-top.leaflet-left .leaflet-control-layers { margin-top: 46px; }
+    }
 
     /* 枠は見えるがタップは通す（点のクリックを邪魔しない） */
     .leaflet-pane.pane-frame, .leaflet-pane.pane-frame * { pointer-events: none !important; }
@@ -82,8 +86,12 @@
   <script src="data/gis_3.js"></script> <!-- 点（URL等の属性を含む） -->
 
   <script>
-    // ===== Map =====
-    const map = L.map('map', { zoomControl:true, maxZoom:28, minZoom:1 })
+    // ===== 端末判定 & ぼやけ防止設定 =====
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const MAX_NATIVE_ZOOM = 18; // GSIタイルの実用ネイティブ最大
+
+    // ===== Map（z>18での拡大補間＝ぼやけを防ぐ） =====
+    const map = L.map('map', { zoomControl:true, maxZoom: MAX_NATIVE_ZOOM, minZoom:1 })
       .fitBounds([[35.02142399844622,136.88612396178715],[35.02547667835214,136.89563370359895]]);
     new L.Hash(map);
 
@@ -95,13 +103,14 @@
     map.createPane('pane_base_photo');  map.getPane('pane_base_photo').style.zIndex = 200;
     map.createPane('pane_base_pale');   map.getPane('pane_base_pale').style.zIndex  = 201;
 
+    // Retina対応（detectRetina）＋ maxNativeZoom を明示
     const layer_photo = L.tileLayer(
       'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',
-      { pane:'pane_base_photo', minNativeZoom:2, maxNativeZoom:18 }
+      { pane:'pane_base_photo', detectRetina:true, maxNativeZoom: MAX_NATIVE_ZOOM }
     ).addTo(map); // 初期は写真
     const layer_pale = L.tileLayer(
       'https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',
-      { pane:'pane_base_pale',  minNativeZoom:2, maxNativeZoom:18 }
+      { pane:'pane_base_pale', detectRetina:true, maxNativeZoom: MAX_NATIVE_ZOOM }
     );
 
     // ===== Frame（枠：常時表示・タッチ透過） =====
@@ -115,36 +124,27 @@
     }).addTo(map);
 
     // ===== util =====
-    // B案：表示名は“最初の属性項目の値”（QGISの順番を尊重）
     function firstNonEmptyPropValue(props){
       if (!props) return '属性';
       const skip = new Set(['geometry','boundedBy']);
-      for (const k of Object.keys(props)){
-        if (skip.has(k)) continue;
-        const v = props[k];
-        if (v !== null && v !== undefined && String(v) !== '') return String(v);
+      for (const k of Object.keys(props)){ if (skip.has(k)) continue;
+        const v = props[k]; if (v!=null && String(v) !== '') return String(v);
       }
       return '属性';
     }
-    function labelOf(key){ return key; } // ラベル変換しない（キー名そのまま）
-    function valToText(v){
-      if (v === null || v === undefined) return '';
-      if (typeof v === 'object') return JSON.stringify(v);
-      return String(v);
-    }
-    // URL候補（URL/url/Url/link など、または値が http(s) 始まりの最初のもの）
+    function labelOf(key){ return key; } // キー名そのまま（B案）
+    function valToText(v){ if (v==null) return ''; return (typeof v==='object') ? JSON.stringify(v) : String(v); }
     function findUrlFromProps(props){
       if (!props) return null;
       for (const k of Object.keys(props)){
-        const v = props[k]; if (v == null) continue;
+        const v = props[k]; if (v==null) continue;
         const s = String(v).trim();
-        if (k.toLowerCase() === 'url' || k.toLowerCase() === 'link' || /^https?:\/\//i.test(s)){
+        if (k.toLowerCase()==='url' || k.toLowerCase()==='link' || /^https?:\/\//i.test(s)){
           if (/^https?:\/\//i.test(s)) return s;
         }
       }
       return null;
     }
-    // HTMLエスケープ
     function esc(s){ return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
 
     // ===== トースト & パルス =====
@@ -214,6 +214,12 @@
       },{passive:true});
     })();
 
+    // 属性パネルをポップアップの「詳細」から呼び出すためのグローバル関数
+    window.__openAttr = function(encoded){
+      try{ openAttrPanel(JSON.parse(decodeURIComponent(encoded))); }catch(e){}
+      return false;
+    };
+
     // ===== Points（gis点：トースト＋ポヨッ＋ポップアップ→リンク／属性） =====
     map.createPane('pane_points'); map.getPane('pane_points').style.zIndex = 403;
     function style_gis_3_0() {
@@ -232,13 +238,12 @@
           `<div style="font-size:13px;line-height:1.4;">
             ${fid ? `fid:　${esc(fid)}<br>` : ``}
             ${url ? `URL:　<a href="${esc(url)}" target="_self" rel="noopener">リンク</a><br>` : ``}
-            <a href="#" onclick="(function(){openAttrPanel(${encodeURIComponent(JSON.stringify(props)).replace(/'/g,'\\\'')});})()">詳細</a>
+            <a href="#" onclick="return window.__openAttr('${encodeURIComponent(JSON.stringify(props))}');">詳細</a>
           </div>`;
 
         layer.bindPopup(html, { maxWidth: 260, closeButton: true, autoClose: true });
 
         layer.on('click', ()=>{
-          // 何をタップしたか（B案：最初の属性値）＋ ポヨッ
           const title = firstNonEmptyPropValue(props) || 'ポイント';
           showToast(`選択: ${title}`);
           pulseMarker(layer);
@@ -253,10 +258,15 @@
       { label:'地理院タイル_淡色地図', layer: layer_pale, radioGroup:'bm' },
       { label:'03_地理院タイル_(全国最新写真（シームレス））', layer: layer_photo, radioGroup:'bm' }
     ];
-    L.control.layers.tree(null, overlaysTree, { collapsed:false }).addTo(map);
+    L.control.layers.tree(null, overlaysTree, {
+      collapsed:false,
+      position: isMobile ? 'topleft' : 'topright' // ★ スマホは左上
+    }).addTo(map);
 
-    // レイアウト再計算
-    addEventListener('resize', ()=> map.invalidateSize(), { passive:true });
+    // レイアウト再計算（回転/アドレスバー変動でのボケ防止）
+    map.whenReady(()=> map.invalidateSize());
+    addEventListener('orientationchange', ()=> setTimeout(()=> map.invalidateSize(), 200), { passive:true });
+    addEventListener('resize',            ()=> setTimeout(()=> map.invalidateSize(), 200), { passive:true });
   </script>
 </body>
 </html>
