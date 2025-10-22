@@ -6,103 +6,97 @@
   <meta name="viewport" content="initial-scale=1, maximum-scale=1, width=device-width, viewport-fit=cover, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <!-- 既存アセット（qgis2web出力のまま） -->
   <link rel="stylesheet" href="css/leaflet.css">
+  <link rel="stylesheet" href="css/L.Control.Layers.Tree.css">
   <link rel="stylesheet" href="css/qgis2web.css">
   <style>
-    html, body { margin:0; padding:0; height:100%; overflow:hidden; -webkit-tap-highlight-color: transparent; }
+    html, body { margin:0; padding:0; height:100%; -webkit-tap-highlight-color: transparent; }
     #map { width:100vw; height:100svh; touch-action: pan-x pan-y pinch-zoom; }
-    .leaflet-interactive { cursor:pointer; }
-    .leaflet-control-attribution { display:block !important; font-size:12px; }
-    .leaflet-control-layers { max-height: 70svh; overflow:auto; }
-
-    /* ★ 枠は常時表示＆タッチ透過（上の点タップを邪魔しない） */
+    /* 枠は見えるけどタップは通す（点が押せるように） */
     .leaflet-pane.pane-frame,
-    .leaflet-pane.pane-frame * { pointer-events: none !important; }
+    .leaflet-pane.pane-frame * { pointer-events:none !important; }
+    /* パネルの見た目はqgis2web標準のまま（画像の感じ） */
+    .leaflet-control-layers-tree { max-height:70svh; overflow:auto; }
   </style>
-  <title>Web Map</title>
+  <title>レイヤツリー（前と同じ見た目）</title>
 </head>
 <body>
   <div id="map"></div>
 
-  <!-- 既存アセット -->
+  <!-- JS資産 -->
   <script src="js/leaflet.js"></script>
+  <script src="js/L.Control.Layers.Tree.min.js"></script>
   <script src="js/leaflet-hash.js"></script>
-  <script src="data/_2.js"></script><!-- 枠 -->
-  <script src="data/gis_3.js"></script><!-- 点（URL属性あり） -->
+
+  <!-- データ（qgis2web出力） -->
+  <script src="data/_2.js"></script>    <!-- 枠 -->
+  <script src="data/gis_3.js"></script> <!-- 点（URL属性） -->
 
   <script>
     // ===== Map =====
-    const map = L.map('map', {
-      zoomControl: true,
-      dragging: true,
-      touchZoom: true,
-      tap: true,
-      scrollWheelZoom: true,
-      maxZoom: 20, minZoom: 1
-    }).fitBounds([[35.00873592469054,136.8754285322846],[35.03087538697442,136.9122549129309]]);
+    const map = L.map('map', { zoomControl:true, maxZoom:28, minZoom:1 })
+      .fitBounds([[35.02142399844622,136.88612396178715],[35.02547667835214,136.89563370359895]]);
     new L.Hash(map);
 
-    // 出典（コピーライト）
-    map.attributionControl.setPrefix('<a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a>');
-    map.attributionControl.addAttribution('地理院タイル（国土地理院） / qgis2web / QGIS');
+    // 出典
+    map.attributionControl.setPrefix('<a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a> · <a href="https://qgis.org" target="_blank" rel="noopener">QGIS</a> · qgis2web');
+    map.attributionControl.addAttribution('地理院タイル（国土地理院）');
 
-    // ===== ベース地図 =====
-    const gsiPhoto = L.tileLayer(
+    // ===== Base layers（画像のようにラジオ） =====
+    map.createPane('pane_base_photo');  map.getPane('pane_base_photo').style.zIndex = 200;
+    map.createPane('pane_base_pale');   map.getPane('pane_base_pale').style.zIndex  = 201;
+
+    const layer_photo = L.tileLayer(
       'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',
-      { minZoom:1, maxZoom:20, minNativeZoom:2, maxNativeZoom:18 }
+      { pane:'pane_base_photo', minNativeZoom:2, maxNativeZoom:18 }
     );
-    const gsiPale = L.tileLayer(
+    const layer_pale = L.tileLayer(
       'https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',
-      { minZoom:1, maxZoom:20, minNativeZoom:2, maxNativeZoom:18 }
-    ).addTo(map); // 初期は淡色
+      { pane:'pane_base_pale',  minNativeZoom:2, maxNativeZoom:18 }
+    );
+    // 最初は写真側をON（画像例に合わせる）
+    layer_photo.addTo(map);
 
-    // ===== Pane（描画順） =====
-    // 枠（下段・タッチ透過）
-    const framePane = map.createPane('pane_frame');
-    framePane.classList.add('pane-frame');
-    framePane.style.zIndex = 330;
+    // ===== Frame（枠：常時表示・タッチ透過） =====
+    map.createPane('pane_frame'); map.getPane('pane_frame').classList.add('pane-frame');
+    map.getPane('pane_frame').style.zIndex = 402;
 
-    // 点（上段・タッチ取得）
-    const pointsPane = map.createPane('pane_points');
-    pointsPane.style.zIndex = 450;
-
-    // ===== 枠（_2）——常時表示・タッチ透過 =====
-    function style__2_0() {
-      return { opacity:1, color:'#e31a1c', weight:11, fill:true, fillOpacity:0, interactive:false };
-    }
-    const layer__2 = L.geoJSON(json__2, {
-      pane:'pane_frame', style: style__2_0, interactive:false
+    const layer_frame = L.geoJSON(json__2, {
+      pane:'pane_frame',
+      interactive:false,
+      style: ()=>({
+        opacity:1, color:'rgba(227,26,28,1.0)', weight:11,
+        fill:true, fillOpacity:0
+      })
     }).addTo(map);
 
-    // ===== 点（gis_3）——タップで直リンク（ポップアップなし） =====
-    function style_gis_3_0() {
-      return { radius:8, color:'#000', weight:2, fill:true, fillColor:'#fff', fillOpacity:1 };
-    }
-    function onEach_gis_3(feature, layer){
-      // URL/ url / Url などゆるく対応
-      const f = feature && feature.properties ? feature.properties : {};
-      const url = (f.URL || f.url || f.Url || f.link || '').toString().trim();
-      if (url) {
-        layer.on('click', () => {
-          // スマホでも確実に遷移させたいので _self
-          location.href = url;
-        });
-      }
-    }
-    const layer_gis_3 = L.geoJSON(json_gis_3, {
+    // ===== Points（gis点：タップで直リンク） =====
+    map.createPane('pane_points'); map.getPane('pane_points').style.zIndex = 403;
+
+    const layer_points = L.geoJSON(json_gis_3, {
       pane:'pane_points',
-      pointToLayer: (f, latlng)=> L.circleMarker(latlng, style_gis_3_0(f)),
-      onEachFeature: onEach_gis_3
+      pointToLayer: (f, latlng)=> L.circleMarker(latlng, {
+        radius:10, opacity:1, color:'rgba(35,35,35,1.0)', weight:1,
+        fill:true, fillOpacity:1, fillColor:'rgba(229,182,54,1.0)'
+      }),
+      onEachFeature: (feature, layer)=>{
+        const props = feature && feature.properties ? feature.properties : {};
+        const url = (props.URL || props.url || props.Url || props.link || '').toString().trim();
+        if (url) layer.on('click', ()=> location.href = url);
+      }
     }).addTo(map);
 
-    // ===== レイヤコントロール（前と同じくシンプル） =====
-    L.control.layers(
-      { "地理院タイル_淡色地図": gsiPale, "全国最新写真（シームレス）": gsiPhoto },
-      { "gis点": layer_gis_3, "枠（常時表示）": layer__2 },
-      { collapsed:false, position:'topright' }
-    ).addTo(map);
+    // ===== qgis2web風ツリーパネル（画像の見た目） =====
+    const overlaysTree = [
+      { label: '<img src="legend/gis_3.png" /> gis点', layer: layer_points },
+      { label: '<img src="legend/_2.png" /> 枠', layer: layer_frame },
+      { label: '地理院タイル_淡色地図', layer: layer_pale,   radioGroup:'bm' },
+      { label: '03_地理院タイル_(全国最新写真（シームレス））', layer: layer_photo, radioGroup:'bm' }
+    ];
+    L.control.layers.tree(null, overlaysTree, { collapsed:false }).addTo(map);
 
-    // 画面回転・アドレスバー変動で再レイアウト
+    // レイアウト再計算（回転/アドレスバーで）
     addEventListener('resize', ()=> map.invalidateSize(), { passive:true });
   </script>
 </body>
