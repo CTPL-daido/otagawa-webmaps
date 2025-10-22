@@ -31,7 +31,7 @@
     }
     .toast.show { opacity: 1; }
 
-    /* ===== 属性パネル（下からスライド） ===== */
+    /* ===== 属性パネル（下からスライド：QGISの属性順のまま） ===== */
     .attr-panel {
       position: fixed; left:0; right:0; bottom:0; z-index:10010; background:#fff;
       border-top-left-radius:16px; border-top-right-radius:16px; box-shadow:0 -8px 24px rgba(0,0,0,.18);
@@ -50,7 +50,7 @@
     .attr-actions .primary { border-color:#1c7ed6; color:#1c7ed6; font-weight:700; }
   </style>
 
-  <title>Webマップ（前仕様＋属性表示・2ステップ遷移）</title>
+  <title>全部入り Webマップ（前仕様＋ポップアップ＋属性＋2ステップ遷移）</title>
 </head>
 <body>
   <div id="map"></div>
@@ -58,7 +58,7 @@
   <!-- 何をタップしたかトースト -->
   <div id="tapToast" class="toast" aria-live="polite" aria-atomic="true"></div>
 
-  <!-- 属性パネル（QGIS属性を“元の順序”で表示／リンクを押すとAR開始） -->
+  <!-- 属性パネル（QGIS属性を“元の順序”で表示／ボタンでAR開始） -->
   <div id="attrPanel" class="attr-panel" aria-live="polite">
     <div class="handle"></div>
     <header id="attrTitle">属性</header>
@@ -115,29 +115,28 @@
     }).addTo(map);
 
     // ===== util =====
-    // B案：タイトルも「属性の最初の項目の値」を優先（NAMEなどに固定しない）
+    // B案：表示名は“最初の属性項目の値”（QGISの順番を尊重）
     function firstNonEmptyPropValue(props){
-      if (!props) return '';
+      if (!props) return '属性';
       const skip = new Set(['geometry','boundedBy']);
-      for (const k of Object.keys(props)){ // JSはキー挿入順を保持（一般的ブラウザ実装）
+      for (const k of Object.keys(props)){
         if (skip.has(k)) continue;
         const v = props[k];
         if (v !== null && v !== undefined && String(v) !== '') return String(v);
       }
       return '属性';
     }
-    function labelOf(key){ return key; } // B案：キー名そのまま（ラベル変換しない）
+    function labelOf(key){ return key; } // ラベル変換しない（キー名そのまま）
     function valToText(v){
       if (v === null || v === undefined) return '';
       if (typeof v === 'object') return JSON.stringify(v);
       return String(v);
     }
-    // URL候補の検出：キーがURL系、または値がhttp(s)で始まるものの“先頭に見つかった”もの
+    // URL候補（URL/url/Url/link など、または値が http(s) 始まりの最初のもの）
     function findUrlFromProps(props){
       if (!props) return null;
       for (const k of Object.keys(props)){
-        const v = props[k];
-        if (v === null || v === undefined) continue;
+        const v = props[k]; if (v == null) continue;
         const s = String(v).trim();
         if (k.toLowerCase() === 'url' || k.toLowerCase() === 'link' || /^https?:\/\//i.test(s)){
           if (/^https?:\/\//i.test(s)) return s;
@@ -145,6 +144,8 @@
       }
       return null;
     }
+    // HTMLエスケープ
+    function esc(s){ return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
 
     // ===== トースト & パルス =====
     const toastEl = document.getElementById('tapToast');
@@ -156,7 +157,7 @@
       try{
         const o = layer.options;
         layer.setStyle({ radius: o.radius * 1.35, weight: (o.weight||1) + 2 });
-        setTimeout(()=> layer.setStyle({ radius: o.radius, weight: o.weight }), 500);
+        setTimeout(()=> layer.setStyle({ radius: o.radius, weight: o.weight }), 450);
       }catch(e){}
     }
 
@@ -169,10 +170,9 @@
     const pClose = document.getElementById('attrCloseBtn');
 
     function openAttrPanel(props){
-      // タイトルは“最初の項目の値”を表示（B案）
       pTitle.textContent = firstNonEmptyPropValue(props);
 
-      // テーブル生成：QGISの属性順（オブジェクトのキー順）でそのまま表示
+      // QGISの属性順で表示（geometry等は除外）
       pTable.innerHTML = '';
       const skip = new Set(['geometry','boundedBy']);
       let rows = 0;
@@ -197,7 +197,6 @@
       }
       pNote.textContent = rows ? '' : 'このポイントに表示できる属性はありません。';
 
-      // 「ARを開始」ボタン
       const url = findUrlFromProps(props);
       if (url){ pOpen.style.display=''; pOpen.href = url; }
       else    { pOpen.style.display='none'; }
@@ -215,7 +214,7 @@
       },{passive:true});
     })();
 
-    // ===== Points（gis点：トースト＋ポヨッ＋属性パネル→リンクでAR開始） =====
+    // ===== Points（gis点：トースト＋ポヨッ＋ポップアップ→リンク／属性） =====
     map.createPane('pane_points'); map.getPane('pane_points').style.zIndex = 403;
     function style_gis_3_0() {
       return { pane:'pane_points', radius:10, opacity:1, color:'rgba(35,35,35,1.0)', weight:1, fill:true, fillOpacity:1, fillColor:'rgba(229,182,54,1.0)' };
@@ -225,13 +224,24 @@
       pointToLayer: (f, latlng)=> L.circleMarker(latlng, style_gis_3_0(f)),
       onEachFeature: (feature, layer)=>{
         const props = feature?.properties || {};
+        const fid = (props.fid ?? props.id ?? '').toString();
+        const url = findUrlFromProps(props);
+
+        // 画像のようなシンプルな内容（fid と URL: リンク）＋ 詳細（属性パネル）リンク
+        const html =
+          `<div style="font-size:13px;line-height:1.4;">
+            ${fid ? `fid:　${esc(fid)}<br>` : ``}
+            ${url ? `URL:　<a href="${esc(url)}" target="_self" rel="noopener">リンク</a><br>` : ``}
+            <a href="#" onclick="(function(){openAttrPanel(${encodeURIComponent(JSON.stringify(props)).replace(/'/g,'\\\'')});})()">詳細</a>
+          </div>`;
+
+        layer.bindPopup(html, { maxWidth: 260, closeButton: true, autoClose: true });
+
         layer.on('click', ()=>{
-          // 何をタップしたか：B案でも視認性のため、最初の項目値を表示
+          // 何をタップしたか（B案：最初の属性値）＋ ポヨッ
           const title = firstNonEmptyPropValue(props) || 'ポイント';
           showToast(`選択: ${title}`);
           pulseMarker(layer);
-          // パネルを開く（ここでリンクを確認 → 「ARを開始」をタップする2ステップ固定）
-          openAttrPanel(props);
         });
       }
     }).addTo(map);
