@@ -15,23 +15,13 @@
     html, body { margin:0; padding:0; height:100%; -webkit-tap-highlight-color: transparent; }
     #map { width:100vw; height:100svh; touch-action: pan-x pan-y pinch-zoom; }
 
-    /* —— レイヤ欄：画面左上に“常に固定” —— */
-    .leaflet-top.leaflet-left{
-      position: fixed;   /* viewport基準で固定 */
-      top: 8px;
-      left: 8px;
-      z-index: 10050;    /* 地図より常に上 */
-      width: auto;
-      pointer-events: auto;
-    }
+    /* ★ レイヤ欄は“地図の右上”に固定（デフォ動作）。viewport固定CSSは使わない */
     .leaflet-control-layers { max-height: 70svh; overflow:auto; }
-    /* ズームボタンと干渉しにくい余白（必要なら値を調整） */
-    .leaflet-top.leaflet-left .leaflet-control-layers { margin-top: 46px; }
 
     /* 枠は見えるがタップは通す（点のクリックを邪魔しない） */
     .leaflet-pane.pane-frame, .leaflet-pane.pane-frame * { pointer-events: none !important; }
 
-    /* 何をタップしたか一時表示（トースト）— 点サイズは変えない */
+    /* 何をタップしたか一時表示（任意・邪魔なら後で消せます） */
     .toast {
       position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%);
       z-index: 10000; background: rgba(0,0,0,0.78); color:#fff;
@@ -41,7 +31,7 @@
     .toast.show { opacity: 1; }
   </style>
 
-  <title>Webマップ（左上固定＋高精細ズーム・点サイズ不変）</title>
+  <title>Webマップ（レイヤ＝地図右上固定／点サイズ不変／高精細）</title>
 </head>
 <body>
   <div id="map"></div>
@@ -52,12 +42,12 @@
   <script src="js/leaflet-hash.js"></script>
 
   <!-- データ -->
-  <script src="data/_2.js"></script>    <!-- 枠 -->
-  <script src="data/gis_3.js"></script> <!-- 点 -->
+  <script src="data/_2.js"></script><!-- 枠 -->
+  <script src="data/gis_3.js"></script><!-- 点 -->
 
   <script>
-    // ===== ぼやけ防止設定 =====
-    const MAX_NATIVE_ZOOM = 18; // 地理院タイルの実用上限
+    // ===== ぼやけ防止（GSIタイルのネイティブ上限に合わせる） =====
+    const MAX_NATIVE_ZOOM = 18;
 
     // 小数ズームを使わず、ネイティブ上限以上に拡大しない
     const map = L.map('map', {
@@ -69,10 +59,6 @@
       wheelDebounceTime: 40,
       zoomAnimation: true
     }).fitBounds([[35.00873592469054,136.8754285322846],[35.03087538697442,136.9122549129309]]);
-
-    // ズームボタンは右上へ（左上レイヤ欄と干渉しないように）
-    map.zoomControl.setPosition('topright');
-
     new L.Hash(map);
 
     // 出典
@@ -99,7 +85,7 @@
     function style__2_0(){ return { opacity:1, color:'#e31a1c', weight:11, fill:true, fillOpacity:0, interactive:false }; }
     const layer__2 = L.geoJSON(json__2, { pane:'pane_frame', style: style__2_0, interactive:false }).addTo(map);
 
-    // ===== 点（fid と URLリンクだけを表示／自動遷移なし／サイズ不変） =====
+    // ===== 点（fid と URLリンクのみ／サイズ不変／2ステップ） =====
     const toastEl = document.getElementById('tapToast');
     function showToast(t){
       toastEl.textContent = t;
@@ -107,9 +93,14 @@
       clearTimeout(showToast._t);
       showToast._t = setTimeout(()=> toastEl.classList.remove('show'), 900);
     }
-
-    function style_gis_3_0(){ return { radius:8, color:'#000', weight:2, fill:true, fillColor:'#fff', fillOpacity:1 }; }
-
+    function firstNonEmpty(props){
+      if (!props) return '属性';
+      const skip = new Set(['geometry','boundedBy']);
+      for (const k of Object.keys(props)){ if (skip.has(k)) continue;
+        const v = props[k]; if (v!=null && String(v) !== '') return String(v);
+      }
+      return '属性';
+    }
     function findUrl(props){
       if (!props) return null;
       for (const k of Object.keys(props)){
@@ -122,14 +113,8 @@
       return null;
     }
     function esc(s){ return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
-    function firstNonEmpty(props){
-      if (!props) return '属性';
-      const skip = new Set(['geometry','boundedBy']);
-      for (const k of Object.keys(props)){ if (skip.has(k)) continue;
-        const v = props[k]; if (v!=null && String(v) !== '') return String(v);
-      }
-      return '属性';
-    }
+
+    function style_gis_3_0(){ return { radius:8, color:'#000', weight:2, fill:true, fillColor:'#fff', fillOpacity:1 }; }
 
     const layer_gis_3 = L.geoJSON(json_gis_3, {
       pane:'pane_points',
@@ -139,7 +124,7 @@
         const href = findUrl(p);
         const fid  = (p.fid != null ? String(p.fid) : (p.id != null ? String(p.id) : ''));
 
-        // ポップアップは「fid / URL: リンク」のみ（サイズ変更なし）
+        // ポップアップは「fid / URL: リンク」のみ（サイズ変更なし／自動遷移なし）
         const html =
           `<div style="font-size:13px;line-height:1.4;">
             ${fid ? `fid：${esc(fid)}<br>` : ``}
@@ -155,11 +140,11 @@
       }
     }).addTo(map);
 
-    // ===== レイヤコントロール（API上も左上指定） =====
+    // ===== レイヤコントロール：地図の右上に固定（デフォルト挙動） =====
     L.control.layers(
       { "地理院タイル_淡色地図": gsiPale, "全国最新写真（シームレス）": gsiPhoto },
       { "gis点": layer_gis_3, "枠": layer__2 },
-      { collapsed:false, position:'topleft' }
+      { collapsed:false, position:'topright' }   // ★ 地図の右上に固定
     ).addTo(map);
 
     // ビューポート変動時のレイアウト再計測（ボケやズレ防止）
