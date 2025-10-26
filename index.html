@@ -15,13 +15,14 @@
     html, body { margin:0; padding:0; height:100%; -webkit-tap-highlight-color: transparent; }
     #map { width:100vw; height:100svh; touch-action: pan-x pan-y pinch-zoom; }
 
-    /* ★ レイヤ欄は“地図の右上”に固定（デフォ動作）。viewport固定CSSは使わない */
+    /* ★ レイヤ欄は“地図の右上”に追従（Leaflet標準の absolute を強制。固定化はしない） */
+    .leaflet-top, .leaflet-bottom { position: absolute !important; }
     .leaflet-control-layers { max-height: 70svh; overflow:auto; }
 
     /* 枠は見えるがタップは通す（点のクリックを邪魔しない） */
     .leaflet-pane.pane-frame, .leaflet-pane.pane-frame * { pointer-events: none !important; }
 
-    /* 何をタップしたか一時表示（任意・邪魔なら後で消せます） */
+    /* 何をタップしたか一時表示（任意・邪魔なら削除可。点サイズは変えません） */
     .toast {
       position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%);
       z-index: 10000; background: rgba(0,0,0,0.78); color:#fff;
@@ -31,7 +32,7 @@
     .toast.show { opacity: 1; }
   </style>
 
-  <title>Webマップ（レイヤ＝地図右上固定／点サイズ不変／高精細）</title>
+  <title>Webマップ（地図右上追従＋アンチ巨大化）</title>
 </head>
 <body>
   <div id="map"></div>
@@ -46,19 +47,21 @@
   <script src="data/gis_3.js"></script><!-- 点 -->
 
   <script>
-    // ===== ぼやけ防止（GSIタイルのネイティブ上限に合わせる） =====
+    // ===== ぼやけ防止 =====
     const MAX_NATIVE_ZOOM = 18;
 
-    // 小数ズームを使わず、ネイティブ上限以上に拡大しない
     const map = L.map('map', {
       zoomControl: true,
       minZoom: 1,
       maxZoom: MAX_NATIVE_ZOOM,
-      zoomSnap: 1,
+      zoomSnap: 1,         // 小数ズーム抑制（ボケ防止）
       zoomDelta: 1,
       wheelDebounceTime: 40,
       zoomAnimation: true
     }).fitBounds([[35.00873592469054,136.8754285322846],[35.03087538697442,136.9122549129309]]);
+
+    // レイヤ欄＝地図の“右上”に追従（標準）
+    map.zoomControl.setPosition('topright');
     new L.Hash(map);
 
     // 出典
@@ -66,40 +69,51 @@
     map.attributionControl.addAttribution('地理院タイル（国土地理院） / qgis2web / QGIS');
 
     // ===== ベース地図（Retina対応＋ネイティブ上限を明示） =====
-    const gsiPhoto = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg', {
+    const basePhoto = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg', {
       detectRetina: true,
       maxNativeZoom: MAX_NATIVE_ZOOM,
       updateWhenZooming: true
     });
-    const gsiPale  = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {
+    const basePale  = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {
       detectRetina: true,
       maxNativeZoom: MAX_NATIVE_ZOOM,
       updateWhenZooming: true
     }).addTo(map); // 初期は淡色
 
-    // ===== Pane設定 =====
+    // ===== Pane =====
     const framePane  = map.createPane('pane_frame');  framePane.classList.add('pane-frame'); framePane.style.zIndex = 330;
     const pointsPane = map.createPane('pane_points'); pointsPane.style.zIndex = 450;
 
-    // ===== 枠（常時表示・タッチ透過） =====
-    function style__2_0(){ return { opacity:1, color:'#e31a1c', weight:11, fill:true, fillOpacity:0, interactive:false }; }
-    const layer__2 = L.geoJSON(json__2, { pane:'pane_frame', style: style__2_0, interactive:false }).addTo(map);
+    // ===== “ズームしても巨大に見えない”可変スタイル関数 =====
+    // 高ズームほど細く/小さくする。視覚的なバランスを保つための経験則です。
+    function sizeForZoom(z){
+      // 点半径：z12→7px / z15→5px / z18→3-4px
+      const r = Math.max(3, Math.round(-0.8 * z + 16));
+      // 枠の太さ：z12→6px / z15→3px / z18→1px
+      const w = Math.max(1, Math.round(-1.2 * z + 20));
+      return { r, w };
+    }
 
-    // ===== 点（fid と URLリンクのみ／サイズ不変／2ステップ） =====
+    // ===== 枠（常時表示・タッチ透過） =====
+    let currentFrameWeight = sizeForZoom(map.getZoom()).w;
+    function style_frame(){ return { opacity:1, color:'#e31a1c', weight: currentFrameWeight, fill:true, fillOpacity:0, interactive:false }; }
+    const layer_frame = L.geoJSON(json__2, { pane:'pane_frame', style: style_frame, interactive:false }).addTo(map);
+
+    // ===== 点（fid と URLリンクのみ／自動遷移なし／タップしてもサイズ不変） =====
     const toastEl = document.getElementById('tapToast');
     function showToast(t){
       toastEl.textContent = t;
       toastEl.classList.add('show');
       clearTimeout(showToast._t);
-      showToast._t = setTimeout(()=> toastEl.classList.remove('show'), 900);
+      showToast._t = setTimeout(()=> toastEl.classList.remove('show'), 800);
     }
     function firstNonEmpty(props){
-      if (!props) return '属性';
+      if (!props) return 'ポイント';
       const skip = new Set(['geometry','boundedBy']);
       for (const k of Object.keys(props)){ if (skip.has(k)) continue;
         const v = props[k]; if (v!=null && String(v) !== '') return String(v);
       }
-      return '属性';
+      return 'ポイント';
     }
     function findUrl(props){
       if (!props) return null;
@@ -114,40 +128,50 @@
     }
     function esc(s){ return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
 
-    function style_gis_3_0(){ return { radius:8, color:'#000', weight:2, fill:true, fillColor:'#fff', fillOpacity:1 }; }
+    let currentPointRadius = sizeForZoom(map.getZoom()).r;
+    function style_point(){ return { radius: currentPointRadius, color:'#000', weight:1, fill:true, fillColor:'#fff', fillOpacity:1 }; }
 
-    const layer_gis_3 = L.geoJSON(json_gis_3, {
+    const layer_points = L.geoJSON(json_gis_3, {
       pane:'pane_points',
-      pointToLayer: (f, latlng)=> L.circleMarker(latlng, style_gis_3_0(f)),
+      pointToLayer: (f, latlng)=> L.circleMarker(latlng, style_point()),
       onEachFeature: (feature, layer)=>{
         const p   = feature?.properties || {};
-        const href = findUrl(p);
-        const fid  = (p.fid != null ? String(p.fid) : (p.id != null ? String(p.id) : ''));
+        const url = findUrl(p);
+        const fid = (p.fid != null ? String(p.fid) : (p.id != null ? String(p.id) : ''));
 
-        // ポップアップは「fid / URL: リンク」のみ（サイズ変更なし／自動遷移なし）
         const html =
           `<div style="font-size:13px;line-height:1.4;">
             ${fid ? `fid：${esc(fid)}<br>` : ``}
-            ${href ? `URL：<a href="${esc(href)}" target="_self" rel="noopener">リンク</a>` : `URL：—`}
+            ${url ? `URL：<a href="${esc(url)}" target="_self" rel="noopener">リンク</a>` : `URL：—`}
           </div>`;
         layer.bindPopup(html, { maxWidth: 260, closeButton: true, autoClose: true });
 
-        // クリック時：トーストのみ（点の大きさは一切変更しない）
-        layer.on('click', ()=>{
-          const title = firstNonEmpty(p) || 'ポイント';
-          showToast(`選択: ${title}`);
-        });
+        layer.on('click', ()=> showToast(`選択: ${firstNonEmpty(p)}`));
       }
     }).addTo(map);
 
-    // ===== レイヤコントロール：地図の右上に固定（デフォルト挙動） =====
+    // ===== ズームに応じて見た目を調整（アンチ巨大化） =====
+    function applyZoomAdaptiveStyles(){
+      const z = map.getZoom();
+      const sz = sizeForZoom(z);
+      // 点
+      currentPointRadius = sz.r;
+      layer_points.eachLayer(l => l.setStyle({ radius: currentPointRadius, weight: 1 }));
+      // 枠
+      currentFrameWeight = sz.w;
+      layer_frame.setStyle({ weight: currentFrameWeight });
+    }
+    map.on('zoomend', applyZoomAdaptiveStyles);
+    applyZoomAdaptiveStyles(); // 初期適用
+
+    // ===== レイヤコントロール（地図の右上に追従） =====
     L.control.layers(
-      { "地理院タイル_淡色地図": gsiPale, "全国最新写真（シームレス）": gsiPhoto },
-      { "gis点": layer_gis_3, "枠": layer__2 },
-      { collapsed:false, position:'topright' }   // ★ 地図の右上に固定
+      { "地理院タイル_淡色地図": basePale, "全国最新写真（シームレス）": basePhoto },
+      { "gis点": layer_points, "枠": layer_frame },
+      { collapsed:false, position:'topright' }
     ).addTo(map);
 
-    // ビューポート変動時のレイアウト再計測（ボケやズレ防止）
+    // レイアウト確定（回転・アドレスバー変動など）
     map.whenReady(()=> map.invalidateSize());
     addEventListener('orientationchange', ()=> setTimeout(()=> map.invalidateSize(), 200), { passive:true });
     addEventListener('resize',            ()=> setTimeout(()=> map.invalidateSize(), 200), { passive:true });
