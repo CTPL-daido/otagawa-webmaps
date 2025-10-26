@@ -1,158 +1,193 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
-<head>
-  <meta charset="utf-8" />
-  <title>スマホ最適・地理院タイル切替（地図右上レイヤ追従）</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <!-- ★ スマホ最適化（全画面・ピンチ対応） -->
+    <meta name="viewport" content="initial-scale=1, user-scalable=no, maximum-scale=1, width=device-width">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
 
-  <!-- Leaflet（CDN） -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- 既存アセット（お手本通り） -->
+    <link rel="stylesheet" href="css/leaflet.css">
+    <link rel="stylesheet" href="css/L.Control.Layers.Tree.css">
+    <link rel="stylesheet" href="css/qgis2web.css">
+    <link rel="stylesheet" href="css/fontawesome-all.min.css">
+    <link rel="stylesheet" href="css/MarkerCluster.css">
+    <link rel="stylesheet" href="css/MarkerCluster.Default.css">
 
-  <!-- Layers Tree（CDN） -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet.control.layers.tree@2.0.2/L.Control.Layers.Tree.css" />
-  <script src="https://unpkg.com/leaflet.control.layers.tree@2.0.2/L.Control.Layers.Tree.min.js"></script>
+    <style>
+      /* ★ 画面いっぱいの地図に変更（固定pxを廃止） */
+      html, body { height: 100%; margin: 0; }
+      #map { width: 100vw; height: 100svh; touch-action: pan-x pan-y pinch-zoom; }
 
-  <!-- Hash（CDN） -->
-  <script src="https://unpkg.com/leaflet-hash@0.2.1/leaflet-hash.js"></script>
+      /* レイヤーツリー：スマホでも扱いやすくスクロール可 */
+      .leaflet-control-layers,
+      .leaflet-control-layers-tree { max-height: 70svh; overflow: auto; }
+    </style>
+    <title>Webマップ（スマホ対応・レイヤ切替・出典明示）</title>
+  </head>
+  <body>
+    <div id="map"></div>
 
-  <!-- MarkerCluster（CDN） -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
-  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+    <!-- 既存JS（お手本通り） -->
+    <script src="js/qgis2web_expressions.js"></script>
+    <script src="js/leaflet.js"></script>
+    <script src="js/L.Control.Layers.Tree.min.js"></script>
+    <script src="js/leaflet.rotatedMarker.js"></script>
+    <script src="js/leaflet.pattern.js"></script>
+    <script src="js/leaflet-hash.js"></script>
+    <script src="js/Autolinker.min.js"></script>
+    <script src="js/rbush.min.js"></script>
+    <script src="js/labelgun.min.js"></script>
+    <script src="js/labels.js"></script>
+    <script src="js/leaflet.markercluster.js"></script>
 
-  <style>
-    /* 画面いっぱいの地図。iOSの上下バーでも崩れにくく */
-    html, body, #map { height: 100%; margin: 0; padding: 0; }
-    body { overscroll-behavior: none; touch-action: pan-x pan-y; }
-    #map { padding-bottom: env(safe-area-inset-bottom); }
+    <!-- データ -->
+    <script src="data/_2.js"></script>
+    <script src="data/gis_3.js"></script>
 
-    /* レイヤーツリー：常に“地図の右上”に追従（Leaflet標準の absolute をそのまま使う） */
-    .leaflet-top.leaflet-right { top: 10px; right: 10px; z-index: 1000; }
-    .leaflet-control-layers {
-      max-height: 60vh; overflow-y: auto; -webkit-overflow-scrolling: touch; font-size: 14px;
-      background: rgba(255,255,255,.95);
-    }
-    .leaflet-control-layers-toggle { width: 36px; height: 36px; }
+    <script>
+      // ===== マップ =====
+      const map = L.map('map', {
+        zoomControl: false,
+        minZoom: 1,
+        // ★ 過ズームで白画面にならないよう18でクランプ（地理院タイルの実質上限）
+        maxZoom: 18
+      }).fitBounds([[35.02169835485059,136.88604755471448],[35.02575102115678,136.89555729652628]]);
 
-    /* ズームボタンをタップしやすく */
-    .leaflet-control-zoom a { width: 40px; height: 40px; line-height: 40px; font-size: 20px; }
+      new L.Hash(map);
+      L.control.zoom({ position: 'topleft' }).addTo(map);
 
-    /* 出典の視認性を少しだけ向上 */
-    .leaflet-control-attribution { backdrop-filter: blur(2px); }
-  </style>
-</head>
-<body>
-  <div id="map"></div>
+      // ★ 出典を明示（qgis2web / Leaflet / QGIS に加えて 地理院タイルを追記）
+      map.attributionControl.setPrefix(
+        '<a href="https://github.com/tomchadwin/qgis2web" target="_blank" rel="noopener">qgis2web</a> &middot; ' +
+        '<a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a> &middot; ' +
+        '<a href="https://qgis.org" target="_blank" rel="noopener">QGIS</a>'
+      );
+      map.attributionControl.addAttribution('出典：<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">地理院タイル（国土地理院）</a>');
 
-  <!-- qgis2web エクスポートのデータ（枠と点） -->
-  <script src="data/_1.js"></script>       <!-- ポリゴン（枠）: json__1 -->
-  <script src="data/gis_2.js"></script>    <!-- 点（URL付き）   : json_gis_2 -->
+      const autolinker = new Autolinker({ truncate: { length: 30, location: 'smart' } });
+      const bounds_group = new L.featureGroup([]);
+      function setBounds(){}
 
-  <script>
-    // ===== マップ初期化（“過ズーム白画面”の原因を排除） =====
-    const map = L.map('map', {
-      zoomControl: false,
-      // ★ GSIタイルの上限に合わせてクランプ（pinchで18を超えない）
-      maxZoom: 18,
-      minZoom: 1,
-      tap: true
-      // zoomSnap/zoomDeltaは未指定：お手本に合わせ、Leaflet標準のピンチ挙動を使う
-    }).fitBounds([[35.018, 136.883],[35.028, 136.900]]);
-    new L.Hash(map);
+      // ===== ベースタイル（地理院：淡色／シームレス写真）=====
+      map.createPane('pane_03___0'); map.getPane('pane_03___0').style.zIndex = 400;
+      const layer_03___0 = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg', {
+        pane: 'pane_03___0',
+        opacity: 1.0,
+        minZoom: 1,
+        maxZoom: 18,
+        minNativeZoom: 2,
+        maxNativeZoom: 18
+      });
 
-    // 左上：ズーム（地図の左上に追従）
-    L.control.zoom({ position: 'topleft' }).addTo(map);
+      map.createPane('pane___1'); map.getPane('pane___1').style.zIndex = 401;
+      const layer___1 = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {
+        pane: 'pane___1',
+        opacity: 1.0,
+        minZoom: 1,
+        maxZoom: 18,
+        minNativeZoom: 2,
+        maxNativeZoom: 18
+      }).addTo(map); // 初期：淡色
 
-    // 出典（お手本準拠）
-    map.attributionControl.setPrefix(
-      '<a href="https://github.com/tomchadwin/qgis2web" target="_blank" rel="noopener">qgis2web</a> · ' +
-      '<a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a> · ' +
-      '<a href="https://qgis.org" target="_blank" rel="noopener">QGIS</a>'
-    );
-
-    // ===== ベースマップ（GSI：上限は18。過ズームでタイル欠損しない） =====
-    const gsiListUrl = 'https://maps.gsi.go.jp/development/ichiran.html';
-    const basePale = L.tileLayer(
-      'https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',
-      { minZoom: 1, maxZoom: 18,
-        attribution: '出典：<a href="'+gsiListUrl+'" target="_blank" rel="noopener">地理院タイル</a>（淡色地図）' }
-    ).addTo(map); // 初期：淡色
-    const basePhoto = L.tileLayer(
-      'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',
-      { minZoom: 1, maxZoom: 18,
-        attribution: '出典：<a href="'+gsiListUrl+'" target="_blank" rel="noopener">地理院タイル</a>（全国最新写真）' }
-    );
-
-    // ===== オーバーレイ：枠 =====
-    const layerPolygon = L.geoJSON(json__1, {
-      interactive: true,
-      style: () => ({ color: 'red', weight: 3, opacity: 1, fill: false }),
-      onEachFeature: (f, layer) => {
-        layer.bindPopup('<table><tr><td>fid:</td><td>' + (f.properties?.fid ?? '') + '</td></tr></table>');
+      // ===== 枠 =====
+      function pop__2(feature, layer) {
+        const popupContent =
+          '<table><tr><td colspan="2">' +
+          (feature.properties['fid'] !== null ? autolinker.link(String(feature.properties['fid'])) : '') +
+          '</td></tr></table>';
+        layer.bindPopup(popupContent, { maxHeight: 400 });
       }
-    }).addTo(map);
-
-    // ===== オーバーレイ：点（ピンチでもサイズ変化なし＝固定半径） =====
-    const layerPoints = L.geoJSON(json_gis_2, {
-      interactive: true,
-      pointToLayer: (f, latlng) => L.circleMarker(latlng, {
-        radius: 6,              // ★ 固定半径。ズーム・タップでも変化しない
-        fillColor: '#ffcc00',
-        color: '#000',
-        weight: 1, opacity: 1, fillOpacity: 1
-      }),
-      onEachFeature: (f, layer) => {
-        const link = f.properties?.url || f.properties?.URL; // url/URL どちらでも
-        let html = '<table><tr><td>fid:</td><td>' + (f.properties?.fid ?? '') + '</td></tr>';
-        if (link) html += '<tr><td>URL:</td><td><a href="'+link+'" target="_blank" rel="noopener">リンク</a></td></tr>';
-        html += '</table>';
-        layer.bindPopup(html);
+      function style__2_0() {
+        return {
+          pane: 'pane__2',
+          opacity: 1,
+          color: 'rgba(227,26,28,1.0)',
+          lineCap: 'butt',
+          lineJoin: 'miter',
+          weight: 11,
+          fill: true,
+          fillOpacity: 1,
+          fillColor: 'rgba(231,113,72,0.0)',
+          interactive: true
+        }
       }
-    });
+      map.createPane('pane__2'); map.getPane('pane__2').style.zIndex = 402;
+      map.getPane('pane__2').style['mix-blend-mode'] = 'normal';
+      const layer__2 = new L.geoJson(json__2, {
+        attribution: '',
+        interactive: true,
+        dataVar: 'json__2',
+        layerName: 'layer__2',
+        pane: 'pane__2',
+        onEachFeature: pop__2,
+        style: style__2_0
+      }).addTo(map);
+      bounds_group.addLayer(layer__2);
 
-    // クラスタ（お手本準拠）
-    const clusterPoints = L.markerClusterGroup({
-      showCoverageOnHover: false,
-      spiderfyOnMaxZoom: true,
-      disableClusteringAtZoom: 17
-    }).addLayer(layerPoints).addTo(map);
+      // ===== 点 =====
+      function pop_gis_3(feature, layer) {
+        const popupContent =
+          '<table>' +
+            '<tr><td colspan="2">' + (feature.properties['fid'] !== null ? autolinker.link(String(feature.properties['fid'])) : '') + '</td></tr>' +
+            '<tr><td colspan="2">' + (feature.properties['URL'] !== null ? autolinker.link(String(feature.properties['URL'])) : '') + '</td></tr>' +
+          '</table>';
+        layer.bindPopup(popupContent, { maxHeight: 400 });
+      }
+      function style_gis_3_0() {
+        return {
+          pane: 'pane_gis_3',
+          radius: 10,
+          opacity: 1,
+          color: 'rgba(35,35,35,1.0)',
+          weight: 1,
+          fill: true,
+          fillOpacity: 1,
+          fillColor: 'rgba(229,182,54,1.0)',
+          interactive: true
+        }
+      }
+      map.createPane('pane_gis_3'); map.getPane('pane_gis_3').style.zIndex = 403;
+      map.getPane('pane_gis_3').style['mix-blend-mode'] = 'normal';
+      const layer_gis_3 = new L.geoJson(json_gis_3, {
+        attribution: '',
+        interactive: true,
+        dataVar: 'json_gis_3',
+        layerName: 'layer_gis_3',
+        pane: 'pane_gis_3',
+        onEachFeature: pop_gis_3,
+        pointToLayer: function (feature, latlng) {
+          return L.circleMarker(latlng, style_gis_3_0(feature));
+        }
+      });
 
-    // ===== レイヤーコントロール：常に“地図の右上”に追従 =====
-    const baseTree = {
-      label: '背景地図',
-      children: [
-        { label: '地理院タイル（淡色地図）', layer: basePale,  radioGroup: 'basemap' },
-        { label: '地理院タイル（全国最新写真）', layer: basePhoto, radioGroup: 'basemap' }
-      ]
-    };
-    const overlayTree = {
-      label: '表示レイヤ',
-      children: [
-        { label: '枠（ポリゴン）', layer: layerPolygon },
-        { label: 'gis点（クラスタ）', layer: clusterPoints }
-      ]
-    };
-    L.control.layers.tree(baseTree, overlayTree, {
-      collapsed: false,          // 初期から展開（見失わない）
-      namedToggle: true,
-      selectAllCheckbox: true,
-      position: 'topright'       // ← 地図の右上。二本指ズームでも“地図と一緒に”動く
-    }).addTo(map);
+      const cluster_gis_3 = new L.MarkerClusterGroup({
+        showCoverageOnHover: false,
+        spiderfyDistanceMultiplier: 2
+      });
+      cluster_gis_3.addLayer(layer_gis_3).addTo(map);
+      bounds_group.addLayer(layer_gis_3);
 
-    // ===== 表示範囲（データに合わせる） =====
-    const boundsGroup = L.featureGroup([layerPolygon, layerPoints]);
-    if (boundsGroup.getLayers().length) {
-      map.fitBounds(boundsGroup.getBounds(), { padding: [10, 10] });
-    }
+      // ===== レイヤ切替（ツリー）：スマホでも操作しやすい設定 =====
+      const overlaysTree = [
+        { label: '<img src="legend/gis_3.png" /> gis点', layer: cluster_gis_3 },
+        { label: '<img src="legend/_2.png" /> 枠', layer: layer__2 },
+        { label: '地理院タイル_淡色地図', layer: layer___1, radioGroup: 'bm' },
+        { label: '03_地理院タイル_(全国最新写真（シームレス））', layer: layer_03___0, radioGroup: 'bm' }
+      ];
+      L.control.layers.tree(null, overlaysTree, {
+        collapsed: true,      // 初期は畳む（開くと中でスクロール可能）
+        position: 'topright'  // 地図の右上
+      }).addTo(map);
 
-    // ===== 真っ白対策（エラー時の可視化） =====
-    window.addEventListener('error', e => {
-      const msg = document.createElement('div');
-      msg.style.cssText='position:fixed;left:8px;bottom:8px;background:#000a;color:#fff;padding:6px 8px;border-radius:6px;font:12px/1.4 system-ui;z-index:9999';
-      msg.textContent='Error: '+(e.message||'unknown');
-      document.body.appendChild(msg); setTimeout(()=>msg.remove(),8000);
-    });
-  </script>
-</body>
+      // ===== 端末回転・アドレスバー変動の再計測（スマホのズレ防止） =====
+      map.whenReady(()=> map.invalidateSize());
+      addEventListener('orientationchange', ()=> setTimeout(()=> map.invalidateSize(), 180), { passive:true });
+      addEventListener('resize',            ()=> setTimeout(()=> map.invalidateSize(), 180), { passive:true });
+
+      setBounds();
+    </script>
+  </body>
 </html>
