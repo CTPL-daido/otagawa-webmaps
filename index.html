@@ -2,203 +2,162 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <title>WEBマップ（自前レイヤーパネル・iPhone最適化）</title>
+  <title>WEBマップ（アイコン付きレイヤ／枠フィット）</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <!-- Leaflet -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <style>
     :root { --vh: 1vh; }
-
-    html, body {
-      margin: 0; padding: 0; height: 100%;
-      background: #fff;
+    html, body { margin:0; padding:0; height:100%; background:#fff; }
+    #map{
+      position:fixed; inset:0; width:100%; height:calc(var(--vh)*100);
+      touch-action: pan-x pan-y pinch-zoom; overscroll-behavior:none;
     }
-
-    /* 画面いっぱい（iOSバー伸縮対策にfixed＋--vh） */
-    #map {
-      position: fixed; inset: 0;           /* top:0 right:0 bottom:0 left:0 */
-      width: 100%;
-      height: calc(var(--vh) * 100);
-      touch-action: pan-x pan-y pinch-zoom;
-      overscroll-behavior: none;
+    /* 右上レイヤパネル */
+    .layer-panel{
+      position:fixed; right:10px; top:calc(env(safe-area-inset-top) + 8px);
+      z-index:1000; max-width:260px;
+      background:rgba(255,255,255,.95); backdrop-filter:blur(4px);
+      border-radius:12px; box-shadow:0 6px 20px rgba(0,0,0,.15);
+      padding:10px 12px; font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,"Hiragino Sans","Noto Sans JP","Yu Gothic",Meiryo,sans-serif;
     }
-
-    /* レイヤーパネル */
-    .layer-panel {
-      position: fixed;
-      top: calc(env(safe-area-inset-top) + 8px);
-      left: 10px;
-      z-index: 1000;
-      background: rgba(255,255,255,0.92);
-      backdrop-filter: blur(4px);
-      border-radius: 12px;
-      box-shadow: 0 6px 20px rgba(0,0,0,0.15);
-      padding: 10px 12px;
-      font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Sans", "Noto Sans JP", "Yu Gothic", "Meiryo", sans-serif;
-    }
-    .layer-panel h3 { margin: 0 0 6px; font-size: 14px; }
-    .layer-panel .sec { margin-top: 8px; }
-    .layer-panel label { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+    .layer-panel h3{ margin:0 0 6px; font-size:14px; }
+    .layer-panel .sec{ margin-top:8px; }
+    .layer-panel label{ display:flex; align-items:center; gap:8px; margin:4px 0; white-space:nowrap; }
+    .chip{ width:14px; height:14px; border-radius:50%; border:2px solid #333; background:#ffd54f; display:inline-block; }
+    .chip.square{ border-radius:3px; background:#e53935; border-color:#b71c1c; }
+    .chip.base{ border-radius:14px; background:#1976d2; border-color:#0d47a1; } /* ベース用丸アイコン */
 
     /* 出典 */
-    .credit {
-      position: fixed;
-      right: 8px;
-      bottom: calc(env(safe-area-inset-bottom) + 8px);
-      z-index: 1000;
-      background: rgba(255,255,255,0.9);
-      padding: 6px 8px;
-      border-radius: 10px;
-      font: 12px/1.3 system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Sans", "Noto Sans JP", "Yu Gothic", "Meiryo", sans-serif;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+    .credit{
+      position:fixed; right:8px; bottom:calc(env(safe-area-inset-bottom) + 8px);
+      z-index:1000; background:rgba(255,255,255,.9);
+      padding:6px 8px; border-radius:10px; font:12px/1.3 system-ui,-apple-system,"Segoe UI",Roboto,"Hiragino Sans","Noto Sans JP","Yu Gothic",Meiryo,sans-serif;
+      box-shadow:0 4px 12px rgba(0,0,0,.12);
     }
-
-    /* 枠レイヤーは常時ONでタップ透過 */
-    .leaflet-pane.frame-pane { z-index: 550; pointer-events: none; }
+    /* 枠は最前面pane・タップ透過 */
+    .leaflet-pane.frame-pane{ z-index:550; pointer-events:none; }
   </style>
 </head>
 <body>
   <div id="map"></div>
 
-  <!-- レイヤーパネル -->
   <div class="layer-panel" id="layerPanel">
     <h3>レイヤ</h3>
+
     <div class="sec">
-      <strong>ベース</strong>
-      <div><label><input type="radio" name="base" value="gsi_pale"> 地理院タイル（淡色）</label></div>
-      <div><label><input type="radio" name="base" value="gsi_std" checked> 地理院タイル（標準）</label></div>
-      <div><label><input type="radio" name="base" value="osm"> OpenStreetMap</label></div>
+      <label><input type="checkbox" data-overlay="points" checked>
+        <span class="chip"></span> gis点
+      </label>
+      <label><input type="checkbox" data-overlay="frame" checked>
+        <span class="chip square"></span> 枠
+      </label>
     </div>
+
     <div class="sec">
-      <strong>オーバーレイ</strong>
-      <div><label><input type="checkbox" data-overlay="points" checked> 地点（タップ可）</label></div>
-      <div><label><input type="checkbox" data-overlay="lines" checked> 線・範囲</label></div>
-      <div><label><input type="checkbox" data-overlay="labels"> ラベル</label></div>
-      <div><label><input type="checkbox" checked disabled> 枠（常時ON・点はタップ可）</label></div>
+      <label><input type="radio" name="base" value="gsi_photo" checked>
+        <span class="chip base"></span> 03_地理院タイル_（全国最新写真・シームレス）
+      </label>
+      <label><input type="radio" name="base" value="gsi_std">
+        <span class="chip base" style="background:#388e3c;border-color:#1b5e20"></span> 地理院タイル（標準）
+      </label>
+      <label><input type="radio" name="base" value="osm">
+        <span class="chip base" style="background:#616161;border-color:#212121"></span> OpenStreetMap
+      </label>
     </div>
   </div>
 
-  <!-- 出典 -->
   <div class="credit">
-    出典：<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">国土地理院タイル</a>、© OpenStreetMap contributors
+    出典：<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">国土地理院タイル</a>（標準／シームレス写真）、© OpenStreetMap contributors
   </div>
 
   <script>
-    // ---- iPhoneの実表示高さに追従（visualViewport優先） ----
-    function updateVh() {
+    // 画面高追従（iPhoneアドレスバー変動対応）
+    function updateVh(){
       const vh = (window.visualViewport ? window.visualViewport.height : window.innerHeight) * 0.01;
       document.documentElement.style.setProperty('--vh', vh + 'px');
     }
     updateVh();
-    (window.visualViewport || window).addEventListener('resize', () => { updateVh(); setTimeout(() => map.invalidateSize(), 0); });
-    window.addEventListener('orientationchange', () => { updateVh(); setTimeout(() => map.invalidateSize(), 0); });
+    (window.visualViewport || window).addEventListener('resize', () => { updateVh(); setTimeout(()=>map.invalidateSize(),0); });
+    window.addEventListener('orientationchange', () => { updateVh(); setTimeout(()=>map.invalidateSize(),0); });
 
-    // ---- 地図本体 ----
-    const map = L.map('map', {
-      zoomControl: true,
-      attributionControl: true,
-      tap: false,
-      minZoom: 4, maxZoom: 19
-    }).setView([35.004, 136.883], 15); // 中心とズームは適宜変更
-
+    // 地図
+    const map = L.map('map', { zoomControl:true, attributionControl:true, tap:false, minZoom:4, maxZoom:19 });
     map.attributionControl.setPrefix('');
 
-    // ---- ベース ----
-    const gsi_pale = L.tileLayer(
-      'https://tile-c.openstreetmap.jp/styles/gsi-pale/{z}/{x}/{y}.png',
-      { maxZoom: 19, attribution: '国土地理院タイル（淡色）' }
+    // ベースレイヤ
+    const gsi_photo = L.tileLayer(
+      'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',
+      { maxZoom: 18, attribution: '地理院タイル（全国最新写真・シームレス）' }
     );
     const gsi_std = L.tileLayer(
       'https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png',
-      { maxZoom: 19, attribution: '国土地理院タイル（標準）' }
+      { maxZoom: 19, attribution: '地理院タイル（標準）' }
     );
     const osm = L.tileLayer(
       'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
       { maxZoom: 19, attribution: '© OpenStreetMap contributors' }
     );
-    const baseLayers = { gsi_pale, gsi_std, osm };
-    gsi_std.addTo(map); // 初期：標準
+    const baseLayers = { gsi_photo, gsi_std, osm };
+    gsi_photo.addTo(map); // 初期は写真
 
-    // ---- 枠専用pane（最前面・非インタラクティブ）----
+    // pane（枠を最前面に）
     const framePane = map.createPane('frame-pane');
     framePane.classList.add('frame-pane');
 
-    // ---- オーバーレイ入れ物 ----
+    // オーバーレイ容器
     const overlay = {
       points: L.layerGroup().addTo(map),
-      lines: L.layerGroup().addTo(map),
-      labels: L.layerGroup(),
-      frame: L.layerGroup({ pane: 'frame-pane' }).addTo(map)
+      frame: L.layerGroup({ pane:'frame-pane' }).addTo(map)
     };
 
-    // ---- GeoJSON読込（必要なものだけ置けばOK）----
+    // GeoJSON 読み込み（存在するものだけでOK）
     Promise.all([
-      fetch('points.geojson').then(r => r.ok ? r.json() : null),
-      fetch('lines.geojson').then(r => r.ok ? r.json() : null),
-      fetch('labels.geojson').then(r => r.ok ? r.json() : null),
-      fetch('frame.geojson').then(r => r.ok ? r.json() : null)
-    ]).then(([points, lines, labels, frame]) => {
-      if (points) {
-        L.geoJSON(points, {
-          pointToLayer: (f, latlng) => L.circleMarker(latlng, {
-            radius: 8, weight: 2, color: '#333', fillColor: '#4db', fillOpacity: 0.9
-          }),
-          onEachFeature: (f, layer) => {
-            const p = f.properties || {};
-            const name = p.name || '地点';
-            const url = p.url;
-            let html = `<strong>${name}</strong>`;
-            if (url) html += `<br><a href="${url}" target="_blank" rel="noopener">開く</a>`;
-            layer.bindPopup(html, { maxWidth: 260 });
+      fetch('points.geojson').then(r=>r.ok?r.json():null),
+      fetch('frame.geojson').then(r=>r.ok?r.json():null)
+    ]).then(([points, frame])=>{
+      if(points){
+        L.geoJSON(points,{
+          pointToLayer:(f,latlng)=>L.circleMarker(latlng,{radius:8,weight:2,color:'#333',fillColor:'#ffd54f',fillOpacity:0.95}),
+          onEachFeature:(f,layer)=>{
+            const p=f.properties||{};
+            const name=p.name||'地点';
+            const url=p.url;
+            let html=`<strong>${name}</strong>`;
+            if(url) html+=`<br><a href="${url}" target="_blank" rel="noopener">開く</a>`;
+            layer.bindPopup(html,{maxWidth:260});
           }
         }).addTo(overlay.points);
       }
 
-      if (lines) {
-        L.geoJSON(lines, {
-          style: () => ({ color: '#1e88e5', weight: 3, opacity: 0.9, fillOpacity: 0.05 })
-        }).addTo(overlay.lines);
-      }
-
-      if (labels) {
-        L.geoJSON(labels, {
-          pointToLayer: (f, latlng) => L.marker(latlng, { interactive: false }),
-          onEachFeature: (f, layer) => {
-            const name = (f.properties && f.properties.name) || '';
-            if (name) layer.bindTooltip(name, { permanent: true, direction: 'center', className: 'lbl' });
-          }
-        }).addTo(overlay.labels);
-      }
-
-      if (frame) {
-        L.geoJSON(frame, {
-          pane: 'frame-pane',
-          interactive: false,
-          style: () => ({ color: '#000', weight: 2, opacity: 1, fill: false })
+      let frameLayer=null;
+      if(frame){
+        frameLayer=L.geoJSON(frame,{
+          pane:'frame-pane', interactive:false,
+          style:()=>({color:'#e53935', weight:2, opacity:1, fill:false})
         }).addTo(overlay.frame);
+
+        // 初期視点：枠がすべて入るように
+        try{ map.fitBounds(frameLayer.getBounds(), { padding:[20,20] }); }catch(_){}
+      } else {
+        map.setView([35.0,136.9],13); // 予備
       }
 
-      // 全レイヤの範囲にフィット
-      const all = L.featureGroup([overlay.points, overlay.lines, overlay.labels, overlay.frame]);
-      try { map.fitBounds(all.getBounds(), { padding: [20, 20] }); } catch (_) {}
-      setTimeout(() => map.invalidateSize(), 0); // 初期描画安定化
+      setTimeout(()=>map.invalidateSize(),0);
     });
 
-    // ---- レイヤーパネル操作 ----
-    document.getElementById('layerPanel').addEventListener('change', (e) => {
-      const t = e.target;
-      // ベース切替
-      if (t.name === 'base') {
-        Object.entries(baseLayers).forEach(([key, tl]) => {
-          if (key === t.value) { if (!map.hasLayer(tl)) tl.addTo(map); }
-          else { if (map.hasLayer(tl)) map.removeLayer(tl); }
+    // レイヤパネル操作
+    document.getElementById('layerPanel').addEventListener('change',(e)=>{
+      const t=e.target;
+      if(t.name==='base'){
+        Object.entries(baseLayers).forEach(([key,tl])=>{
+          if(key===t.value){ if(!map.hasLayer(tl)) tl.addTo(map); }
+          else{ if(map.hasLayer(tl)) map.removeLayer(tl); }
         });
       }
-      // オーバーレイON/OFF
-      if (t.dataset.overlay) {
-        const key = t.dataset.overlay;
-        if (t.checked) overlay[key].addTo(map);
+      if(t.dataset.overlay){
+        const key=t.dataset.overlay;
+        if(t.checked) overlay[key].addTo(map);
         else map.removeLayer(overlay[key]);
       }
     });
