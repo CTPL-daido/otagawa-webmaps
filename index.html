@@ -39,14 +39,14 @@
       box-shadow:0 4px 12px rgba(0,0,0,.12);
     }
 
-    /* 枠は最前面pane・タップ透過（点をタップ可能に） */
+    /* 枠は最前面pane・タップ透過 */
     .leaflet-pane.frame-pane{ z-index:550; pointer-events:none; }
   </style>
 </head>
 <body>
   <div id="map"></div>
 
-  <!-- 右上：ベース切替のみ -->
+  <!-- 右上：ベース切替 -->
   <div class="layer-panel" id="layerPanel">
     <h3>レイヤ</h3>
     <label><input type="radio" name="base" value="gsi_pale" checked>
@@ -57,11 +57,11 @@
     </label>
   </div>
 
-  <!-- 出典（自動切替） -->
+  <!-- 出典 -->
   <div class="credit" id="creditBox"></div>
 
   <script>
-    // iPhone用画面高さ調整
+    // iPhone画面補正
     function updateVh(){
       const vh = (window.visualViewport ? window.visualViewport.height : window.innerHeight) * 0.01;
       document.documentElement.style.setProperty('--vh', vh + 'px');
@@ -70,37 +70,39 @@
     (window.visualViewport || window).addEventListener('resize', () => { updateVh(); setTimeout(()=>map.invalidateSize(),0); });
     window.addEventListener('orientationchange', () => { updateVh(); setTimeout(()=>map.invalidateSize(),0); });
 
-    // 地図設定
-    const map = L.map('map', { zoomControl:true, attributionControl:true, tap:false, minZoom:4, maxZoom:19 });
+    // 地図初期化
+    const map = L.map('map', { zoomControl:true, attributionControl:true, tap:false, minZoom:4, maxZoom:19 })
+      .setView([35.004, 136.883], 16);
     map.attributionControl.setPrefix('');
 
     // ベースレイヤ
     const gsi_pale = L.tileLayer(
       'https://tile-c.openstreetmap.jp/styles/gsi-pale/{z}/{x}/{y}.png',
-      { maxZoom: 19, attribution: '地理院タイル（淡色地図）' }
+      { maxZoom: 19 }
     );
     const gsi_photo = L.tileLayer(
       'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',
-      { maxZoom: 18, attribution: '地理院タイル（全国最新写真・シームレス）' }
+      { maxZoom: 18 }
     );
     const baseLayers = { gsi_pale, gsi_photo };
     gsi_pale.addTo(map);
 
-    // 出典文面
-    const CREDIT_TEXT = {
-      gsi_pale: `出典：<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">地理院タイル</a>（淡色地図）`,
-      gsi_photo: `出典：<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">地理院タイル</a>（全国最新写真・シームレス）`
-    };
-    function updateCredit(key){
-      document.getElementById('creditBox').innerHTML = CREDIT_TEXT[key];
+    // 出典
+    const creditBox = document.getElementById('creditBox');
+    function updateCredit(type) {
+      if (type === 'gsi_photo') {
+        creditBox.innerHTML = '出典：<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">地理院タイル</a>（全国最新写真・シームレス）';
+      } else {
+        creditBox.innerHTML = '出典：<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">地理院タイル</a>（淡色地図）';
+      }
     }
     updateCredit('gsi_pale');
 
-    // 枠専用pane
+    // 枠pane
     const framePane = map.createPane('frame-pane');
     framePane.classList.add('frame-pane');
 
-    // 点と枠の常時表示レイヤ
+    // 点・枠レイヤ
     const overlay = {
       points: L.layerGroup().addTo(map),
       frame: L.layerGroup({ pane:'frame-pane' }).addTo(map)
@@ -111,6 +113,7 @@
       fetch('points.geojson').then(r=>r.ok?r.json():null),
       fetch('frame.geojson').then(r=>r.ok?r.json():null)
     ]).then(([points, frame])=>{
+      let boundsAll = [];
       if(points){
         const pointsLayer = L.geoJSON(points,{
           pointToLayer:(f,latlng)=>L.circleMarker(latlng,{
@@ -121,10 +124,11 @@
             const name=p.name||'地点';
             const url=p.url;
             let html=`<strong>${name}</strong>`;
-            if(url) html+=`<br><a href="${url}" target="_blank" rel="noopener">開く</a>`;
-            layer.bindPopup(html,{maxWidth:260});
+            if(url) html+=`<br><a href="${url}" target="_blank">開く</a>`;
+            layer.bindPopup(html);
           }
         }).addTo(overlay.points);
+        boundsAll.push(pointsLayer.getBounds());
       }
 
       if(frame){
@@ -132,9 +136,13 @@
           pane:'frame-pane', interactive:false,
           style:()=>({color:'#e53935', weight:2, opacity:1, fill:false})
         }).addTo(overlay.frame);
+        boundsAll.push(frameLayer.getBounds());
+      }
 
-        // 枠全体が見えるようにフィット
-        try{ map.fitBounds(frameLayer.getBounds(), { padding:[20,20] }); }catch(_){}
+      // 枠または点の範囲にフィット
+      if(boundsAll.length>0){
+        const allBounds = boundsAll.reduce((a,b)=>a.extend(b), boundsAll[0]);
+        map.fitBounds(allBounds, { padding:[20,20] });
       }
       setTimeout(()=>map.invalidateSize(),0);
     });
@@ -143,9 +151,12 @@
     document.getElementById('layerPanel').addEventListener('change',(e)=>{
       const t=e.target;
       if(t.name==='base'){
-        Object.entries(baseLayers).forEach(([key,tl])=>{
-          if(key===t.value){ if(!map.hasLayer(tl)) tl.addTo(map), updateCredit(key); }
-          else{ if(map.hasLayer(tl)) map.removeLayer(tl); }
+        Object.entries(baseLayers).forEach(([key,layer])=>{
+          if(key===t.value){
+            if(!map.hasLayer(layer)){ layer.addTo(map); updateCredit(key); }
+          }else{
+            if(map.hasLayer(layer)){ map.removeLayer(layer); }
+          }
         });
       }
     });
