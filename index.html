@@ -17,7 +17,7 @@
       overscroll-behavior:none;
     }
 
-    /* 右上のレイヤーパネル */
+    /* 右上パネル */
     .layer-panel {
       position:fixed; right:10px; top:calc(env(safe-area-inset-top) + 8px);
       z-index:1000; max-width:300px;
@@ -46,7 +46,7 @@
 <body>
   <div id="map"></div>
 
-  <!-- 右上：ベース切替のみ（点・枠は常時表示） -->
+  <!-- 右上：ベース切替のみ -->
   <div class="layer-panel" id="layerPanel">
     <h3>レイヤ</h3>
     <label><input type="radio" name="base" value="gsi_pale" checked>
@@ -57,11 +57,11 @@
     </label>
   </div>
 
-  <!-- 出典（ベースに応じて自動切替） -->
+  <!-- 出典（自動切替） -->
   <div class="credit" id="creditBox"></div>
 
   <script>
-    // iPhoneの画面高さ補正
+    // iPhone用画面高さ調整
     function updateVh(){
       const vh = (window.visualViewport ? window.visualViewport.height : window.innerHeight) * 0.01;
       document.documentElement.style.setProperty('--vh', vh + 'px');
@@ -70,11 +70,11 @@
     (window.visualViewport || window).addEventListener('resize', () => { updateVh(); setTimeout(()=>map.invalidateSize(),0); });
     window.addEventListener('orientationchange', () => { updateVh(); setTimeout(()=>map.invalidateSize(),0); });
 
-    // 地図本体
+    // 地図設定
     const map = L.map('map', { zoomControl:true, attributionControl:true, tap:false, minZoom:4, maxZoom:19 });
     map.attributionControl.setPrefix('');
 
-    // ベースレイヤー
+    // ベースレイヤ
     const gsi_pale = L.tileLayer(
       'https://tile-c.openstreetmap.jp/styles/gsi-pale/{z}/{x}/{y}.png',
       { maxZoom: 19, attribution: '地理院タイル（淡色地図）' }
@@ -84,23 +84,23 @@
       { maxZoom: 18, attribution: '地理院タイル（全国最新写真・シームレス）' }
     );
     const baseLayers = { gsi_pale, gsi_photo };
-    gsi_pale.addTo(map); // 初期は淡色地図
+    gsi_pale.addTo(map);
 
     // 出典文面
     const CREDIT_TEXT = {
-      gsi_pale: `出典：<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">地理院タイル</a>（淡色地図）`,
-      gsi_photo: `出典：<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">地理院タイル</a>（全国最新写真・シームレス）`
+      gsi_pale: `出典：<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">地理院タイル</a>（淡色地図）`,
+      gsi_photo: `出典：<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">地理院タイル</a>（全国最新写真・シームレス）`
     };
     function updateCredit(key){
       document.getElementById('creditBox').innerHTML = CREDIT_TEXT[key];
     }
     updateCredit('gsi_pale');
 
-    // 枠専用pane（最前面でタップ透過）
+    // 枠専用pane
     const framePane = map.createPane('frame-pane');
     framePane.classList.add('frame-pane');
 
-    // 点と枠の常時表示レイヤー
+    // 点と枠の常時表示レイヤ
     const overlay = {
       points: L.layerGroup().addTo(map),
       frame: L.layerGroup({ pane:'frame-pane' }).addTo(map)
@@ -112,9 +112,9 @@
       fetch('frame.geojson').then(r=>r.ok?r.json():null)
     ]).then(([points, frame])=>{
       if(points){
-        L.geoJSON(points,{
+        const pointsLayer = L.geoJSON(points,{
           pointToLayer:(f,latlng)=>L.circleMarker(latlng,{
-            radius:8, weight:2, color:'#333', fillColor:'#ffb300', fillOpacity:1
+            radius:8, weight:2, color:'#000', fillColor:'#ffb300', fillOpacity:1
           }),
           onEachFeature:(f,layer)=>{
             const p=f.properties||{};
@@ -127,16 +127,14 @@
         }).addTo(overlay.points);
       }
 
-      let frameLayer=null;
       if(frame){
-        frameLayer=L.geoJSON(frame,{
+        const frameLayer=L.geoJSON(frame,{
           pane:'frame-pane', interactive:false,
           style:()=>({color:'#e53935', weight:2, opacity:1, fill:false})
         }).addTo(overlay.frame);
-        // 初期視点は枠がすべて見えるように
+
+        // 枠全体が見えるようにフィット
         try{ map.fitBounds(frameLayer.getBounds(), { padding:[20,20] }); }catch(_){}
-      } else {
-        map.setView([35.0,136.9],13);
       }
       setTimeout(()=>map.invalidateSize(),0);
     });
